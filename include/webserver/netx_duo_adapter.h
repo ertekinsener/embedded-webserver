@@ -1,7 +1,6 @@
 #ifndef APP_INCLUDE_WEBSERVER_NETX_DUO_ADAPTER_
 #define APP_INCLUDE_WEBSERVER_NETX_DUO_ADAPTER_
 
-
 #include <array>
 #include <span>
 #include <string_view>
@@ -143,7 +142,7 @@ UINT send_response(NX_WEB_HTTP_SERVER* server_ptr, std::string_view content,
       server_ptr, &response_packet, status_code,
       static_cast<UINT>(content.size()), const_cast<CHAR*>(content_type.data()),
       NX_NULL);
-uint32_t content_length = static_cast<uint32_t>(content.size());
+// uint32_t content_length = static_cast<uint32_t>(content.size());
   if (status != NX_SUCCESS) {
     return status;
   }
