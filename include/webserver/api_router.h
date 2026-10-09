@@ -8,6 +8,7 @@
 
 namespace webserver {
 
+// Dispatches "/api/..." requests by method and exact path.
 class ApiRouter {
  public:
   struct Handler {
@@ -22,6 +23,7 @@ class ApiRouter {
       function(context, request, response);
     }
   };
+
   struct Route {
     HttpMethod method;
     std::string_view path;
@@ -31,7 +33,8 @@ class ApiRouter {
   explicit ApiRouter(std::span<const Route> routes) noexcept
       : routes_(routes) {}
 
-  void handle(const HttpRequest& request,
+  // 404 if no route matches.
+  void Handle(const HttpRequest& request,
               HttpResponse& response) const noexcept;
 
  private:
@@ -40,5 +43,4 @@ class ApiRouter {
 
 }  // namespace webserver
 
-
-#endif /* APP_INCLUDE_WEBSERVER_API_ROUTER_ */
+#endif  // APP_INCLUDE_WEBSERVER_API_ROUTER_

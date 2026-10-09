@@ -3,10 +3,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string_view>
 
 namespace webserver {
 
+// One static file embedded into the firmware (see web/WebResources.cmake).
 struct WebResource {
   std::string_view path;
   std::string_view content_type;
@@ -16,15 +18,16 @@ struct WebResource {
 
 class ResourceRegistry {
  public:
-  ResourceRegistry(const WebResource* resources, std::size_t count) noexcept;
-  const WebResource* find(std::string_view path) const noexcept;
+  explicit ResourceRegistry(std::span<const WebResource> resources) noexcept
+      : resources_(resources) {}
+
+  // "/" maps to "/index.html". Returns nullptr if there is no such file.
+  const WebResource* Find(std::string_view path) const noexcept;
 
  private:
-  const WebResource* resources_;
-  std::size_t count_;
+  std::span<const WebResource> resources_;
 };
 
 }  // namespace webserver
 
-
-#endif /* APP_INCLUDE_WEBSERVER_RESOURCE_REGISTRY_ */
+#endif  // APP_INCLUDE_WEBSERVER_RESOURCE_REGISTRY_
