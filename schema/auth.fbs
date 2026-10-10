@@ -1,0 +1,18 @@
+// Login API (webserver/README.md, "API").
+namespace webserver.api;
+
+// POST /api/auth/login (public).
+table LoginRequest {
+  username: string;
+  password: string;
+}
+
+// Answer to a successful login. The token goes into later requests as
+// "Authorization: Bearer <token>"; the session ends after `idle_timeout_s`
+// without requests, on logout or on reboot.
+table LoginResponse {
+  token: string;
+  idle_timeout_s: uint32;
+}
+
+root_type LoginRequest;

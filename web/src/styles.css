@@ -1,0 +1,61 @@
+/* Tailwind is compiled at build time (scripts/build.mjs); only the classes
+   used in src/ and index.html end up in the firmware. */
+@import "tailwindcss" source(none);
+@source "./";
+@source "../index.html";
+
+@theme {
+  --color-primary: #0ea5e9;
+  --color-primary-hover: #0284c7;
+  --color-panel: #0f172a;
+  --color-field: #1e293b;
+  --color-field-border: #334155;
+}
+
+@layer base {
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--color-panel); }
+  ::-webkit-scrollbar-thumb { background: var(--color-field-border); border-radius: 4px; }
+  input[type="checkbox"] { accent-color: var(--color-primary); }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-slate-800 bg-panel shadow-xl;
+  }
+  .card-title {
+    @apply text-sm font-semibold uppercase tracking-wider text-primary;
+  }
+  .field-label {
+    @apply mb-1 block text-sm font-medium text-slate-400;
+  }
+  .field {
+    @apply w-full rounded-lg border border-field-border bg-field px-3 py-2.5 text-sm text-white
+      transition focus:border-transparent focus:ring-2 focus:ring-primary focus:outline-none
+      disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .field-hint {
+    @apply mt-1 text-xs text-slate-500;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold
+      transition disabled:cursor-not-allowed disabled:opacity-60;
+  }
+  .btn-primary {
+    @apply bg-primary text-white shadow-lg hover:bg-primary-hover;
+  }
+  .btn-secondary {
+    @apply border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700;
+  }
+  .nav-link {
+    @apply flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-400 transition
+      hover:bg-slate-800 hover:text-white;
+  }
+  .nav-link-active {
+    @apply bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary;
+  }
+  .badge {
+    @apply inline-flex items-center rounded-full border border-slate-700 bg-slate-800 px-2.5 py-0.5
+      font-mono text-xs text-slate-300;
+  }
+}

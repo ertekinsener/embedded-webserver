@@ -1,0 +1,21 @@
+@startuml web_ui_build
+title Web UI build (webserver/web/scripts/build.mjs, run by webserver_add())
+
+start
+:npm ci (once per package-lock.json change);
+:flatc: TypeScript with object API from schema/*.fbs
+ -> <out>/ts/webserver/api/*.ts;
+:tsc type check (src + generated code
+ + FlatBuffers runtime from external/flatbuffers/ts);
+:esbuild bundle src/main.ts
+ (aliases: @api -> generated code,
+  flatbuffers -> submodule runtime);
+:tailwindcss: only the classes used in src/ and index.html;
+:content-hashed names app-<hash>.js / app-<hash>.css,
+ index.html references them;
+:gzip each file at level 9 (kept raw if gzip is larger);
+:write web_resources.h / web_resources.cc
+ (byte arrays, WebResources(), WEBSERVER_WEB_RESOURCES)
+ only if the content changed;
+stop
+@enduml

@@ -1,0 +1,52 @@
+@startuml webserver_request_sequence
+title Login and applying UART settings (NetX Duo; Zephyr and POSIX alike)
+autonumber
+
+actor Browser as B
+participant "NetX web server\nthread" as N
+participant "netx_duo::Adapter" as A
+participant "HttpServer" as H
+participant "ApiRouter" as R
+participant "AuthApi /\nSessionManager" as S
+participant "UartApi /\nUartService" as U
+participant "UartPortDriver\n(web_uart_ports.cc)" as D
+participant "ThreadxSerial<Port>" as T
+
+== Login ==
+B -> N : POST /api/auth/login\nLoginRequest (FlatBuffer)
+N -> A : HandleRequest(server, type, resource, packet)
+A -> A : copy headers (<= 2 KiB) and\nbody (<= 512 B, may span segments)
+A -> H : HandleRequest(HttpRequest, HttpResponse)
+H -> R : Handle()  (path starts with /api/)
+R -> S : Login()  (Access::kPublic)
+S -> S : verify FlatBuffer,\nPBKDF2-HMAC-SHA-256(password),\nconstant-time compare
+alt correct
+  S -> S : 16 random bytes (Platform::random)\n-> 32 hex digit token, session slot
+  S --> B : 200 LoginResponse {token, idle_timeout_s}
+else wrong / locked out
+  S --> B : 401 / 429 (after max_failures)
+end
+
+== Apply settings ==
+B -> N : POST /api/uart/config\nAuthorization: Bearer <token>\nUartSettings
+N -> A : HandleRequest()
+A -> H : HandleRequest()
+H -> R : Handle()
+R -> S : Authorize()  (Access::kSession)
+S -> S : token valid and not idle?\nrestart idle timer
+alt no session
+  R --> B : 401 (UI shows the login again)
+else session
+  R -> U : SetConfig()
+  U -> U : verify FlatBuffer,\nSupports(capabilities, config)?
+  alt unsupported
+    U --> B : 422 "Settings not supported by this port"
+  else supported
+    U -> D : apply(context, config)
+    D -> T : Configure(uart::Config)
+    T --> D : ok / rejected (e.g. BRR out of range)
+    D --> U : true / false
+    U --> B : 204 / 422
+  end
+end
+@enduml

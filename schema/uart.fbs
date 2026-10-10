@@ -1,0 +1,76 @@
+// UART configuration API (webserver/README.md, "API").
+namespace webserver.api;
+
+enum WordLength : byte {
+  Bits_7 = 0,
+  Bits_8 = 1,
+  Bits_9 = 2
+}
+
+enum StopBits : byte {
+  Bits_1 = 0,
+  Bits_0_5 = 1,
+  Bits_2 = 2,
+  Bits_1_5 = 3
+}
+
+enum Parity : byte {
+  None = 0,
+  Even = 1,
+  Odd = 2
+}
+
+enum FlowControl : byte {
+  None = 0,
+  RTS = 1,
+  CTS = 2,
+  RTS_CTS = 3
+}
+
+enum Oversampling : byte {
+  Over16 = 0,
+  Over8 = 1
+}
+
+// Line settings of one port. POST /api/uart/config applies them (204, or
+// 404 unknown port, 422 unsupported or refused by the hardware).
+table UartSettings {
+  port_id: uint8;
+  baud_rate: uint32 = 115200;
+  word_length: WordLength = Bits_8;
+  stop_bits: StopBits = Bits_1;
+  parity: Parity = None;
+  flow_control: FlowControl = None;
+  oversampling: Oversampling = Over16;
+  fifo_enabled: bool = false;
+  tx_rx_swap: bool = false;
+}
+
+// What a port supports, which depends on the platform and the board (e.g.
+// flow control only where RTS/CTS pins are wired). The UI offers only these.
+table UartCapabilities {
+  min_baud_rate: uint32;
+  max_baud_rate: uint32;
+  word_lengths: [WordLength];
+  stop_bits: [StopBits];
+  parities: [Parity];
+  flow_controls: [FlowControl];
+  oversampling: [Oversampling];
+  fifo: bool;        // fifo_enabled may be changed.
+  tx_rx_swap: bool;  // tx_rx_swap may be changed.
+}
+
+table UartPort {
+  id: uint8;
+  name: string;
+  description: string;
+  capabilities: UartCapabilities;
+  settings: UartSettings;
+}
+
+// GET /api/uart/ports.
+table UartPortList {
+  ports: [UartPort];
+}
+
+root_type UartSettings;

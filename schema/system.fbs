@@ -1,0 +1,16 @@
+// Device information API (webserver/README.md, "API").
+namespace webserver.api;
+
+// GET /api/system/info.
+table SystemInfo {
+  device: string;            // Board / MCU, e.g. "NUCLEO-H755ZI-Q".
+  platform: string;          // RTOS and network stack, e.g. "Zephyr".
+  firmware_version: string;
+  build_date: string;
+  uptime_s: uint32;
+  ipv4_address: [ubyte];     // 4 bytes, empty if unknown.
+  ipv4_netmask: [ubyte];
+  mac_address: [ubyte];      // 6 bytes, empty if unknown.
+}
+
+root_type SystemInfo;

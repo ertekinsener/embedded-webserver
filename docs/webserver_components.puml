@@ -1,0 +1,79 @@
+@startuml webserver_components
+title Web server: platform-independent core, adapters and platforms
+
+skinparam componentStyle rectangle
+
+package "webserver/ (portable, C++23, no heap)" {
+  component "WebApplication" as App
+  component "HttpServer" as Server
+  component "ResourceRegistry\n(embedded files)" as Resources
+  component "ApiRouter\n(path + method, Access)" as Router
+  component "AuthApi\nSessionManager\n(PBKDF2, bearer tokens)" as Auth
+  component "UartApi\nUartService\n(capability check)" as Uart
+  component "SystemApi" as System
+  interface "Platform\n(now_ms, random)" as Platform
+  interface "UartPortDriver\n(apply)" as Driver
+  interface "SystemDescription\n(uptime, network)" as SysInfo
+
+  App *-- Server
+  App *-- Resources
+  App *-- Router
+  App *-- Auth
+  App *-- Uart
+  App *-- System
+  Server --> Resources : GET/HEAD files
+  Server --> Router : /api/*
+  Router --> Auth : Authorize() for\nAccess::kSession
+  Router --> Uart
+  Router --> System
+  Auth ..> Platform
+  Uart ..> Driver
+  System ..> SysInfo
+}
+
+package "webserver/adapters/" {
+  component "netx_duo::Adapter" as NetxAdapter
+  component "zephyr::Adapter\n+ resource macros" as ZephyrAdapter
+  component "posix::HttpListener" as PosixAdapter
+}
+
+NetxAdapter --> Server : HttpRequest /\nHttpResponse
+ZephyrAdapter --> Server
+PosixAdapter --> Server
+
+package "CM7/ (ThreadX + NetX Duo)" {
+  component "nx_web_http_server" as NxWeb
+  component "netxduo_app.cc" as CmApp
+  component "web_uart_ports.cc\n8 x ThreadxSerial<Port>" as CmPorts
+  component "hal::rng" as Rng
+}
+NxWeb --> NetxAdapter : request notify
+CmApp --> App : creates
+CmPorts ..|> Driver
+Rng ..|> Platform
+
+package "zephyr_app/ (Zephyr)" {
+  component "HTTP_SERVICE_DEFINE\nstatic + dynamic resources" as ZService
+  component "main.cc" as ZMain
+  component "uart_ports.cc\nuart_configure()" as ZPorts
+}
+ZService --> ZephyrAdapter : dynamic resource cb
+ZMain --> App : creates
+ZPorts ..|> Driver
+
+package "webserver/host/ (PC)" {
+  component "webserver_host\nsimulated ports" as Host
+}
+Host --> PosixAdapter
+Host --> App : creates
+
+package "webserver/web/ (built at build time)" {
+  artifact "schema/*.fbs" as Schemas
+  artifact "src/*.ts + Tailwind" as Ui
+  artifact "web_resources.{h,cc}\n(gzip byte arrays,\nWEBSERVER_WEB_RESOURCES)" as Generated
+}
+Schemas --> Generated : flatc (TypeScript, C++)
+Ui --> Generated : esbuild, tailwindcss, gzip
+Generated --> Resources : WebResources()
+Generated --> ZService : WEBSERVER_ZEPHYR_STATIC_RESOURCES
+@enduml

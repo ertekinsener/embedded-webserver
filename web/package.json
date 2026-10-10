@@ -1,0 +1,18 @@
+{
+  "name": "stm32-webserver-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Web UI embedded into the firmware (see ../README.md).",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "node scripts/build.mjs --typecheck-only"
+  },
+  "devDependencies": {
+    "@fortawesome/free-solid-svg-icons": "7.3.1",
+    "@tailwindcss/cli": "4.3.3",
+    "esbuild": "0.28.2",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2"
+  }
+}

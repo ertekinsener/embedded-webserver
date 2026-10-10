@@ -10,6 +10,11 @@ void HttpServer::HandleRequest(const HttpRequest& request,
     api_.Handle(request, response);
     return;
   }
+  ServeFile(request, response);
+}
+
+void HttpServer::ServeFile(const HttpRequest& request,
+                           HttpResponse& response) const noexcept {
   if (request.method != HttpMethod::kGet &&
       request.method != HttpMethod::kHead) {
     response.SetText(HttpStatus::kMethodNotAllowed, "Method Not Allowed");
@@ -20,14 +25,13 @@ void HttpServer::HandleRequest(const HttpRequest& request,
     response.SetText(HttpStatus::kNotFound, "Not Found");
     return;
   }
-  response.status = HttpStatus::kOk;
-  if (request.method == HttpMethod::kHead) {
-    response.SetEmptyBody(resource->content_type);
-    return;
-  }
-  response.SetBody({reinterpret_cast<const char*>(resource->data),
-                    resource->size},
+  response.SetBody(HttpStatus::kOk,
+                   request.method == HttpMethod::kHead
+                       ? std::span<const std::uint8_t>{}
+                       : resource->data,
                    resource->content_type);
+  response.content_encoding = resource->content_encoding;
+  response.cache_control = resource->cache_control;
 }
 
 }  // namespace webserver
