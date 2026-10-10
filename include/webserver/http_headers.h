@@ -81,8 +81,9 @@ constexpr HttpMethod ParseMethod(std::string_view method) noexcept {
 }
 
 // Writes the response headers besides the status line, Content-Length and
-// Content-Type ("Name: value\r\n" each) into `buffer`. Returns the written
-// part; headers that do not fit are left out.
+// Content-Type ("Name: value\r\n" each) into `buffer`, NUL-terminated (the
+// NUL is not part of the returned view). Headers that do not fit are left
+// out.
 std::string_view FormatExtraHeaders(const HttpResponse& response,
                                     std::span<char> buffer) noexcept;
 

@@ -41,20 +41,29 @@ std::string_view StatusLine(HttpStatus status) noexcept {
 namespace http {
 namespace {
 
+// Keeps the text NUL-terminated: NetX's
+// nx_web_http_server_callback_generate_response_header_extended() rejects a
+// header block whose strlen() differs from the given length.
 class HeaderWriter {
  public:
-  explicit HeaderWriter(std::span<char> buffer) noexcept : buffer_(buffer) {}
+  explicit HeaderWriter(std::span<char> buffer) noexcept : buffer_(buffer) {
+    if (!buffer_.empty()) {
+      buffer_[0] = '\0';
+    }
+  }
 
   // All or nothing, so a header is never cut off.
   void Add(std::string_view name, std::string_view value) noexcept {
+    // +4 for ": " and CRLF, +1 for the terminating NUL.
     if (value.empty() ||
-        size_ + name.size() + value.size() + 4 > buffer_.size()) {
+        size_ + name.size() + value.size() + 5 > buffer_.size()) {
       return;
     }
     Append(name);
     Append(": ");
     Append(value);
     Append("\r\n");
+    buffer_[size_] = '\0';
   }
 
   std::string_view text() const noexcept { return {buffer_.data(), size_}; }
