@@ -7,7 +7,7 @@ using Access = ApiRouter::Access;
 WebApplication::WebApplication(const WebApplicationConfig& config) noexcept
     : resources_(config.resources),
       sessions_(config.credentials, config.platform, config.session_policy),
-      uart_service_(config.uart_ports),
+      uart_service_(config.uart_ports, config.uart_lock),
       auth_api_(sessions_),
       uart_api_(uart_service_),
       system_api_(config.system),

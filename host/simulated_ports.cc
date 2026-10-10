@@ -27,8 +27,9 @@ bool Accept(void* /*context*/, const UartConfig& config) noexcept {
 // so the bridge part of the UI can be tried on the PC.
 bool ApplyBridge(void* /*context*/, std::uint8_t port_id,
                  const webserver::UartBridgeSettings& settings) noexcept {
-  logging::Info("sim", "port {} bridge {} on TCP {}", port_id,
-                settings.enabled ? "on" : "off", settings.tcp_port);
+  logging::Info("sim", "port {} bridge {} (mode {}, port {})", port_id,
+                settings.enabled ? "on" : "off", settings.mode,
+                settings.local_port);
   return true;
 }
 
@@ -92,7 +93,7 @@ std::array<UartPort, 3> ports{{
      .driver = {&Accept, nullptr},
      .config = {.port_id = 1, .fifo_enabled = true},
      .bridge_driver = kSimulatedBridge,
-     .bridge = {.enabled = true, .tcp_port = 4001}},
+     .bridge = {.enabled = true, .local_port = 4001}},
     {.id = 2,
      .name = "SIM2",
      .description = "Like a Zephyr UART (uart_configure)",

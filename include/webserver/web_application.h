@@ -34,6 +34,8 @@ struct WebApplicationConfig {
   Platform platform{};
   SystemDescription system{};
   auth::SessionPolicy session_policy{};
+  // Needed when other threads use uart_service() (see UartServiceLock).
+  UartServiceLock uart_lock{};
 };
 
 // The whole web application, independent of the network stack: embedded UI,
@@ -52,6 +54,7 @@ class WebApplication {
 
   const HttpServer& server() const noexcept { return server_; }
   std::span<const ApiRouter::Route> routes() const noexcept { return routes_; }
+  UartService& uart_service() noexcept { return uart_service_; }
 
  private:
   ResourceRegistry resources_;

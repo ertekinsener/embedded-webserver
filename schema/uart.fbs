@@ -60,16 +60,30 @@ table UartCapabilities {
   tx_rx_swap: bool;  // tx_rx_swap may be changed.
 }
 
-// Ethernet bridge of one port: a raw TCP server passing data between one
-// client and the UART (docs/bridge/README.md). POST /api/bridge/config
-// applies it (204; 404 unknown port; 422 no bridge on this port, values out
-// of range, or a TCP port below 1024 or used by another bridge).
+// How a port is bridged to the network (docs/bridge/README.md).
+enum BridgeMode : byte {
+  TcpServer = 0,  // Raw TCP server on local_port.
+  Rfc2217 = 1,    // Telnet with COM Port Control (RFC 2217) on local_port.
+  TcpClient = 2,  // Connects to remote_address:remote_port.
+  Udp = 3         // Datagrams on local_port, sent to remote_address:
+                  // remote_port or, if unset, to the last sender.
+}
+
+// Ethernet bridge of one port. POST /api/bridge/config applies it (204;
+// 404 unknown port; 422 no bridge on this port, values out of range, a
+// local port below 1024 or used by another bridge, a client mode without
+// remote address).
 table BridgeSettings {
   port_id: uint8;
   enabled: bool;
-  tcp_port: uint16;
-  idle_gap_ms: uint16;  // 0: flush when the UART goes idle.
+  mode: BridgeMode = TcpServer;
+  local_port: uint16;
+  remote_address: [ubyte];  // IPv4, 4 bytes.
+  remote_port: uint16;
+  idle_gap_ms: uint16;      // 0: flush when the UART goes idle.
   max_frame: uint16 = 1024;
+  use_delimiter: bool;      // Also flush when `delimiter` arrives.
+  delimiter: ubyte = 10;
 }
 
 table BridgeStatus {

@@ -108,22 +108,40 @@ struct UartPortDriver {
   void* context = nullptr;
 };
 
-// Ethernet bridge of a port: a raw TCP server that passes data between one
-// client and the UART (docs/bridge/README.md).
+// Ethernet bridge of a port (docs/bridge/README.md). The enumerator values
+// match BridgeMode in schema/uart.fbs.
+enum class UartBridgeMode : std::uint8_t {
+  kTcpServer = 0,  // Raw TCP server on local_port.
+  kRfc2217 = 1,    // Telnet with COM Port Control (RFC 2217) on local_port.
+  kTcpClient = 2,  // Connects to remote_address:remote_port.
+  kUdp = 3,        // Datagrams on local_port; sends to remote_address:
+                   // remote_port, or to the last sender if that is unset.
+};
+
 struct UartBridgeSettings {
   bool enabled = false;
-  std::uint16_t tcp_port = 0;
+  UartBridgeMode mode = UartBridgeMode::kTcpServer;
+  std::uint16_t local_port = 0;
+  std::array<std::uint8_t, 4> remote_address{};
+  std::uint16_t remote_port = 0;
   // 0: send UART data when the line goes idle; else this long after the
   // last byte, merging frames.
   std::uint16_t idle_gap_ms = 0;
-  std::uint16_t max_frame = 1024;  // Bytes per TCP segment at most.
+  std::uint16_t max_frame = 1024;  // Bytes per TCP segment / datagram.
+  // Also send as soon as this byte arrives (and not on idle when
+  // idle_gap_ms is 0).
+  bool use_delimiter = false;
+  std::uint8_t delimiter = '\n';
 };
 
 // Limits UartService checks; ports below 1024 (e.g. HTTP) are not offered.
-inline constexpr std::uint16_t kMinBridgeTcpPort = 1024;
+inline constexpr std::uint16_t kMinBridgeLocalPort = 1024;
 inline constexpr std::uint16_t kMaxBridgeIdleGapMs = 1000;
 inline constexpr std::uint16_t kMaxBridgeFrame = 1460;
 
+// `listening`: bound and waiting (servers, UDP) or connecting (client).
+// `connected`: a peer is attached (the TCP client, the server's client, or
+// the UDP peer data is sent to); its address is client_address/port.
 struct UartBridgeStatus {
   bool listening = false;
   bool connected = false;

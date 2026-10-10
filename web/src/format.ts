@@ -1,4 +1,5 @@
 import {
+  BridgeMode,
   FlowControl,
   Oversampling,
   Parity,
@@ -100,14 +101,61 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
-// "TCP 4001", "TCP 4001, connected" or "" for ports without bridge.
+export const bridgeModeLabels: Record<BridgeMode, string> = {
+  [BridgeMode.TcpServer]: 'TCP server (raw)',
+  [BridgeMode.Rfc2217]: 'RFC 2217 server',
+  [BridgeMode.TcpClient]: 'TCP client',
+  [BridgeMode.Udp]: 'UDP',
+};
+
+// "TCP 4001", "RFC 2217 :4001, connected", "UDP 4003" ... or "" for ports
+// without an enabled bridge.
 export function bridgeSummary(port: UartPortT): string {
-  if (!port.bridge?.enabled) {
+  const bridge = port.bridge;
+  if (!bridge?.enabled) {
     return '';
   }
-  return port.bridgeStatus?.connected
-    ? `TCP ${port.bridge.tcpPort}, connected`
-    : `TCP ${port.bridge.tcpPort}`;
+  const where: Record<BridgeMode, string> = {
+    [BridgeMode.TcpServer]: `TCP ${bridge.localPort}`,
+    [BridgeMode.Rfc2217]: `RFC 2217 ${bridge.localPort}`,
+    [BridgeMode.TcpClient]: `to ${formatIpv4(bridge.remoteAddress)}:${bridge.remotePort}`,
+    [BridgeMode.Udp]: `UDP ${bridge.localPort}`,
+  };
+  return port.bridgeStatus?.connected ? `${where[bridge.mode]}, connected` : where[bridge.mode];
+}
+
+// "192.168.1.2" -> [192, 168, 1, 2]; null if malformed.
+export function parseIpv4(text: string): number[] | null {
+  const parts = text.trim().split('.');
+  if (parts.length !== 4 || !parts.every((part) => /^\d{1,3}$/.test(part))) {
+    return null;
+  }
+  const bytes = parts.map(Number);
+  return bytes.every((byte) => byte <= 255) ? bytes : null;
+}
+
+const kEscapes: Record<string, number> = { '\\n': 10, '\\r': 13, '\\t': 9, '\\0': 0 };
+
+// "\n", "\r", "\t", "\0", "0x0D" or a single character -> byte; null if invalid.
+export function parseDelimiter(text: string): number | null {
+  if (text in kEscapes) {
+    return kEscapes[text];
+  }
+  if (/^0x[0-9a-f]{1,2}$/i.test(text)) {
+    return parseInt(text.slice(2), 16);
+  }
+  if (text.length === 1 && text.charCodeAt(0) < 256) {
+    return text.charCodeAt(0);
+  }
+  return null;
+}
+
+export function delimiterText(byte: number): string {
+  const escape = Object.entries(kEscapes).find(([, value]) => value === byte);
+  if (escape) {
+    return escape[0];
+  }
+  return byte > 32 && byte < 127 ? String.fromCharCode(byte) : `0x${byte.toString(16).padStart(2, '0')}`;
 }
 
 export function formatMac(bytes: number[]): string {

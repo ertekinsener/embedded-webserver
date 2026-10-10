@@ -304,13 +304,17 @@ std::vector<std::uint8_t> SettingsBody(std::uint8_t port, std::uint32_t baud,
   return Finished(builder);
 }
 
-std::vector<std::uint8_t> BridgeBody(std::uint8_t port, bool enabled,
-                                     std::uint16_t tcp_port,
-                                     std::uint16_t idle_gap_ms = 0,
-                                     std::uint16_t max_frame = 1024) {
+std::vector<std::uint8_t> BridgeBody(
+    std::uint8_t port, bool enabled, std::uint16_t local_port,
+    std::uint16_t idle_gap_ms = 0, std::uint16_t max_frame = 1024,
+    api::BridgeMode mode = api::BridgeMode::TcpServer,
+    std::vector<std::uint8_t> remote = {}, std::uint16_t remote_port = 0) {
   flatbuffers::FlatBufferBuilder builder;
-  builder.Finish(api::CreateBridgeSettings(builder, port, enabled, tcp_port,
-                                           idle_gap_ms, max_frame));
+  const auto address = remote.empty() ? 0 : builder.CreateVector(remote).o;
+  builder.Finish(api::CreateBridgeSettings(
+      builder, port, enabled, mode, local_port,
+      flatbuffers::Offset<flatbuffers::Vector<std::uint8_t>>(address),
+      remote_port, idle_gap_ms, max_frame, true, ';'));
   return Finished(builder);
 }
 
@@ -448,7 +452,7 @@ void TestApplication() {
   if (ports != nullptr) {
     const api::UartPort* sim1 = ports->ports()->Get(0);
     EXPECT_TRUE(sim1->bridge() != nullptr && sim1->bridge()->enabled() &&
-                sim1->bridge()->tcp_port() == 4001);
+                sim1->bridge()->local_port() == 4001);
     EXPECT_TRUE(sim1->bridge_status() != nullptr &&
                 sim1->bridge_status()->listening());
     EXPECT_TRUE(ports->ports()->Get(2)->bridge() == nullptr);
@@ -457,8 +461,10 @@ void TestApplication() {
     return client.Send(HttpMethod::kPost, "/api/bridge/config", body).status;
   };
   EXPECT_EQ(bridge(BridgeBody(2, true, 4002, 20, 512)), HttpStatus::kNoContent);
-  EXPECT_EQ(host::SimulatedPorts()[1].bridge.tcp_port, 4002);
+  EXPECT_EQ(host::SimulatedPorts()[1].bridge.local_port, 4002);
   EXPECT_EQ(host::SimulatedPorts()[1].bridge.idle_gap_ms, 20);
+  EXPECT_TRUE(host::SimulatedPorts()[1].bridge.use_delimiter);
+  EXPECT_EQ(host::SimulatedPorts()[1].bridge.delimiter, ';');
   EXPECT_EQ(bridge(BridgeBody(2, true, 4001)),  // SIM1's port.
             HttpStatus::kUnprocessableEntity);
   EXPECT_EQ(bridge(BridgeBody(2, true, 80)), HttpStatus::kUnprocessableEntity);
@@ -472,8 +478,33 @@ void TestApplication() {
   // Disabled bridges do not hold their TCP port.
   EXPECT_EQ(bridge(BridgeBody(1, false, 4001)), HttpStatus::kNoContent);
   EXPECT_EQ(bridge(BridgeBody(2, true, 4001)), HttpStatus::kNoContent);
-  EXPECT_EQ(host::SimulatedPorts()[1].bridge.tcp_port, 4001);
+  EXPECT_EQ(host::SimulatedPorts()[1].bridge.local_port, 4001);
   EXPECT_EQ(bridge(BridgeBody(2, false, 0)), HttpStatus::kNoContent);
+  // Modes: RFC 2217 like a server; a client needs a remote address and
+  // binds no local port (so it may share 4001); UDP may leave the remote
+  // unset but not half set; a bad address length or mode is refused.
+  using Mode = api::BridgeMode;
+  EXPECT_EQ(bridge(BridgeBody(1, true, 4001, 0, 1024, Mode::Rfc2217)),
+            HttpStatus::kNoContent);
+  EXPECT_EQ(bridge(BridgeBody(2, true, 4001, 0, 1024, Mode::TcpClient)),
+            HttpStatus::kUnprocessableEntity);
+  EXPECT_EQ(bridge(BridgeBody(2, true, 4001, 0, 1024, Mode::TcpClient,
+                              {192, 168, 1, 2}, 5000)),
+            HttpStatus::kNoContent);
+  EXPECT_EQ(host::SimulatedPorts()[1].bridge.remote_port, 5000);
+  EXPECT_EQ(host::SimulatedPorts()[1].bridge.remote_address[3], 2);
+  EXPECT_EQ(bridge(BridgeBody(2, true, 4002, 0, 1024, Mode::Udp)),
+            HttpStatus::kNoContent);
+  EXPECT_EQ(bridge(BridgeBody(2, true, 4002, 0, 1024, Mode::Udp, {}, 5000)),
+            HttpStatus::kUnprocessableEntity);
+  EXPECT_EQ(bridge(BridgeBody(2, true, 4002, 0, 1024, Mode::Udp, {1, 2, 3},
+                              5000)),
+            HttpStatus::kBadRequest);
+  EXPECT_EQ(bridge(BridgeBody(2, true, 4002, 0, 1024,
+                              static_cast<Mode>(9))),
+            HttpStatus::kUnprocessableEntity);
+  EXPECT_EQ(bridge(BridgeBody(2, false, 0)), HttpStatus::kNoContent);
+  EXPECT_EQ(bridge(BridgeBody(1, true, 4001)), HttpStatus::kNoContent);
 
   // Logout ends the session.
   EXPECT_EQ(client.Send(HttpMethod::kPost, "/api/auth/logout").status,
@@ -539,9 +570,14 @@ void TestPortListBound() {
           },
           .context = nullptr};
       port.bridge = {.enabled = true,
-                     .tcp_port = 65535,
+                     .mode = webserver::UartBridgeMode::kUdp,
+                     .local_port = 65535,
+                     .remote_address = {255, 255, 255, 255},
+                     .remote_port = 65535,
                      .idle_gap_ms = 1000,
-                     .max_frame = 1460};
+                     .max_frame = 1460,
+                     .use_delimiter = true,
+                     .delimiter = 255};
     }
     webserver::UartService service(ports);
     webserver::UartApi uart_api(service);

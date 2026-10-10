@@ -12,6 +12,7 @@ import { UartPortT } from '@api/uart-port';
 import { UartPortList } from '@api/uart-port-list';
 import { UartSettingsT } from '@api/uart-settings';
 
+export { BridgeMode } from '@api/bridge-mode';
 export { BridgeSettingsT } from '@api/bridge-settings';
 export { BridgeStatusT } from '@api/bridge-status';
 export { FlowControl } from '@api/flow-control';

@@ -1,5 +1,6 @@
 #include "webserver/uart/uart_api.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -72,9 +73,13 @@ flatbuffers::Offset<api::UartPort> CreatePort(
                                capabilities, settings);
   }
   const UartBridgeSettings& bridge = port.bridge;
+  const auto remote_address = builder.CreateVector(
+      bridge.remote_address.data(), bridge.remote_address.size());
   const auto bridge_settings = api::CreateBridgeSettings(
-      builder, port.id, bridge.enabled, bridge.tcp_port, bridge.idle_gap_ms,
-      bridge.max_frame);
+      builder, port.id, bridge.enabled,
+      static_cast<api::BridgeMode>(bridge.mode), bridge.local_port,
+      remote_address, bridge.remote_port, bridge.idle_gap_ms,
+      bridge.max_frame, bridge.use_delimiter, bridge.delimiter);
   UartBridgeStatus status;
   if (port.bridge_driver.status != nullptr) {
     port.bridge_driver.status(port.bridge_driver.context, port.id, status);
@@ -111,6 +116,7 @@ void SendError(UartError error, HttpResponse& response) noexcept {
 
 void UartApi::ListPorts(const HttpRequest& /*request*/,
                         HttpResponse& response) noexcept {
+  const UartService::Guard guard = service_.Locked();
   const std::span<const UartPort> ports = service_.ports();
   if (ports.size() > kMaxPorts ||
       EstimateListSize(ports) > response.buffer().size()) {
@@ -158,11 +164,26 @@ void UartApi::SetBridge(const HttpRequest& request,
   if (bridge == nullptr) {
     return;
   }
-  const auto result = service_.ApplyBridge(
-      bridge->port_id(), {.enabled = bridge->enabled(),
-                          .tcp_port = bridge->tcp_port(),
-                          .idle_gap_ms = bridge->idle_gap_ms(),
-                          .max_frame = bridge->max_frame()});
+  UartBridgeSettings settings{
+      .enabled = bridge->enabled(),
+      // Range-checked by the service.
+      .mode = static_cast<UartBridgeMode>(bridge->mode()),
+      .local_port = bridge->local_port(),
+      .remote_port = bridge->remote_port(),
+      .idle_gap_ms = bridge->idle_gap_ms(),
+      .max_frame = bridge->max_frame(),
+      .use_delimiter = bridge->use_delimiter(),
+      .delimiter = bridge->delimiter(),
+  };
+  if (const auto* address = bridge->remote_address()) {
+    if (address->size() != settings.remote_address.size()) {
+      response.SetText(HttpStatus::kBadRequest, "Bad remote address");
+      return;
+    }
+    std::copy(address->begin(), address->end(),
+              settings.remote_address.begin());
+  }
+  const auto result = service_.ApplyBridge(bridge->port_id(), settings);
   if (!result) {
     SendError(result.error(), response);
     return;

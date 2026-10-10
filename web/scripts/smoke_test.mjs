@@ -12,13 +12,10 @@
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import * as esbuild from 'esbuild';
+import { loadCodec } from './load_codec.mjs';
 
-const webDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { values: args } = parseArgs({
   options: {
     server: { type: 'string' },
@@ -32,23 +29,6 @@ const port = 20000 + Math.floor(Math.random() * 20000);
 const base = args.url ?? `http://127.0.0.1:${port}`;
 const simulated = args.url === undefined;  // webserver_host's SIM1..SIM3
 
-// The codec as an ES module for Node, resolved like in the UI build.
-async function loadCodec() {
-  const result = await esbuild.build({
-    entryPoints: [path.join(webDir, 'src/api/codec.ts')],
-    bundle: true,
-    format: 'esm',
-    platform: 'node',
-    write: false,
-    alias: {
-      '@api': path.join(args.out, 'ts/webserver/api'),
-      flatbuffers: path.join(webDir, '../../external/flatbuffers/ts/flatbuffers.ts'),
-    },
-  });
-  const source = Buffer.from(result.outputFiles[0].contents).toString('base64');
-  return import(`data:text/javascript;base64,${source}`);
-}
-
 async function waitForServer() {
   for (let attempt = 0; attempt < 50; ++attempt) {
     try {
@@ -61,7 +41,7 @@ async function waitForServer() {
   throw new Error('webserver_host did not start');
 }
 
-const codec = await loadCodec();
+const codec = await loadCodec(args.out);
 const server = simulated
   ? spawn(args.server, [String(port)], { stdio: ['ignore', 'ignore', 'inherit'] })
   : null;
@@ -140,16 +120,23 @@ try {
     );
 
     // Bridge: SIM1 starts on TCP 4001, so SIM2 cannot take that port.
-    assert.equal(ports[0].bridge.tcpPort, 4001);
+    assert.equal(ports[0].bridge.localPort, 4001);
     assert.equal(ports[2].bridge, null);
-    const bridge = (port, enabled, tcpPort) =>
+    const bridge = (port, enabled, localPort, mode = codec.BridgeMode.TcpServer, remote = [0, 0, 0, 0], remotePort = 0) =>
       call('POST', '/api/bridge/config',
-           codec.encodeBridgeSettings(new codec.BridgeSettingsT(port, enabled, tcpPort, 0, 1024)));
+           codec.encodeBridgeSettings(new codec.BridgeSettingsT(
+             port, enabled, mode, localPort, remote, remotePort, 0, 1024, false, 10)));
     assert.equal((await bridge(2, true, 4001)).status, 422);
     assert.equal((await bridge(2, true, 4002)).status, 204);
     ports = await get('/api/uart/ports', codec.decodeUartPorts);
-    assert.equal(ports[1].bridge.tcpPort, 4002);
+    assert.equal(ports[1].bridge.localPort, 4002);
     assert.ok(ports[1].bridgeStatus.listening);
+    assert.equal((await bridge(2, true, 0, codec.BridgeMode.TcpClient)).status, 422);
+    assert.equal(
+      (await bridge(2, true, 0, codec.BridgeMode.TcpClient, [192, 168, 1, 2], 5000)).status, 204);
+    ports = await get('/api/uart/ports', codec.decodeUartPorts);
+    assert.equal(ports[1].bridge.mode, codec.BridgeMode.TcpClient);
+    assert.deepEqual(ports[1].bridge.remoteAddress, [192, 168, 1, 2]);
     assert.equal((await bridge(2, false, 4002)).status, 204);
 
     // SIM2 cannot change the FIFO setting.
