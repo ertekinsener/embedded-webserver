@@ -139,6 +139,19 @@ try {
       [57600, codec.WordLength.Bits_7, codec.Parity.Even],
     );
 
+    // Bridge: SIM1 starts on TCP 4001, so SIM2 cannot take that port.
+    assert.equal(ports[0].bridge.tcpPort, 4001);
+    assert.equal(ports[2].bridge, null);
+    const bridge = (port, enabled, tcpPort) =>
+      call('POST', '/api/bridge/config',
+           codec.encodeBridgeSettings(new codec.BridgeSettingsT(port, enabled, tcpPort, 0, 1024)));
+    assert.equal((await bridge(2, true, 4001)).status, 422);
+    assert.equal((await bridge(2, true, 4002)).status, 204);
+    ports = await get('/api/uart/ports', codec.decodeUartPorts);
+    assert.equal(ports[1].bridge.tcpPort, 4002);
+    assert.ok(ports[1].bridgeStatus.listening);
+    assert.equal((await bridge(2, false, 4002)).status, 204);
+
     // SIM2 cannot change the FIFO setting.
     settings.fifoEnabled = true;
     assert.equal(

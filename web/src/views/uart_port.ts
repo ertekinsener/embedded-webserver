@@ -23,11 +23,16 @@ import {
 import { h } from '../ui/dom';
 import { icon } from '../ui/icons';
 import { showToast } from '../ui/toast';
+import { bridgeCard } from './bridge';
 
 // Settings form of one port. Only what the port reports in its
 // capabilities is offered, so the same page fits every platform (e.g. no
 // FIFO or pin swap switches where the driver cannot change them).
-export function uartPortView(port: UartPortT, onApplied: () => Promise<void>): HTMLElement {
+export function uartPortView(
+  port: UartPortT,
+  deviceAddress: string,
+  onApplied: () => Promise<void>,
+): HTMLElement {
   const caps = port.capabilities ?? new UartCapabilitiesT();
   const current = port.settings ?? new UartSettingsT(port.id);
 
@@ -185,6 +190,7 @@ export function uartPortView(port: UartPortT, onApplied: () => Promise<void>): H
       ),
     ),
     form,
+    bridgeCard(port, deviceAddress, onApplied),
   );
 }
 

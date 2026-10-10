@@ -90,6 +90,26 @@ export function formatIpv4(bytes: number[]): string {
   return bytes.length === 4 ? bytes.join('.') : '-';
 }
 
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KiB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+// "TCP 4001", "TCP 4001, connected" or "" for ports without bridge.
+export function bridgeSummary(port: UartPortT): string {
+  if (!port.bridge?.enabled) {
+    return '';
+  }
+  return port.bridgeStatus?.connected
+    ? `TCP ${port.bridge.tcpPort}, connected`
+    : `TCP ${port.bridge.tcpPort}`;
+}
+
 export function formatMac(bytes: number[]): string {
   return bytes.length === 6
     ? bytes.map((b) => b.toString(16).padStart(2, '0')).join(':')

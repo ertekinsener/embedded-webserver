@@ -2,9 +2,11 @@
 // FlatBuffer; errors come back as a status code with a short text.
 
 import {
+  type BridgeSettingsT,
   decodeLoginResponse,
   decodeSystemInfo,
   decodeUartPorts,
+  encodeBridgeSettings,
   encodeLoginRequest,
   encodeUartSettings,
   kFlatBufferType,
@@ -81,5 +83,9 @@ export const api = {
 
   async applyUartSettings(settings: UartSettingsT): Promise<void> {
     await request('POST', '/api/uart/config', encodeUartSettings(settings));
+  },
+
+  async applyBridgeSettings(settings: BridgeSettingsT): Promise<void> {
+    await request('POST', '/api/bridge/config', encodeBridgeSettings(settings));
   },
 };

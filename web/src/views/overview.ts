@@ -1,5 +1,5 @@
 import { text } from '../api/codec';
-import { formatIpv4, formatUptime, portName, settingsSummary } from '../format';
+import { bridgeSummary, formatIpv4, formatUptime, portName, settingsSummary } from '../format';
 import { h } from '../ui/dom';
 import { icon, type IconName } from '../ui/icons';
 import type { AppData } from './shell';
@@ -54,6 +54,16 @@ export function overviewView(data: AppData): HTMLElement {
                     h('p', { class: 'font-medium text-white' }, portName(port)),
                     h('p', { class: 'truncate text-xs text-slate-500' }, text(port.description)),
                   ),
+                  bridgeSummary(port) &&
+                    h(
+                      'span',
+                      {
+                        class: port.bridgeStatus?.connected
+                          ? 'badge hidden border-emerald-500/40 text-emerald-300 sm:inline-flex'
+                          : 'badge hidden sm:inline-flex',
+                      },
+                      bridgeSummary(port),
+                    ),
                   h('span', { class: 'badge' }, settingsSummary(port.settings)),
                   icon('chevron', 'h-3 w-3 text-slate-600'),
                 ),

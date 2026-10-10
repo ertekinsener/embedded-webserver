@@ -60,12 +60,38 @@ table UartCapabilities {
   tx_rx_swap: bool;  // tx_rx_swap may be changed.
 }
 
+// Ethernet bridge of one port: a raw TCP server passing data between one
+// client and the UART (docs/bridge/README.md). POST /api/bridge/config
+// applies it (204; 404 unknown port; 422 no bridge on this port, values out
+// of range, or a TCP port below 1024 or used by another bridge).
+table BridgeSettings {
+  port_id: uint8;
+  enabled: bool;
+  tcp_port: uint16;
+  idle_gap_ms: uint16;  // 0: flush when the UART goes idle.
+  max_frame: uint16 = 1024;
+}
+
+table BridgeStatus {
+  listening: bool;
+  connected: bool;
+  client_address: [ubyte];  // IPv4, empty without a client.
+  client_port: uint16;
+  uart_to_net_bytes: uint32;
+  net_to_uart_bytes: uint32;
+  dropped_bytes: uint32;    // UART data with no client to take it.
+  uart_errors: uint32;
+}
+
 table UartPort {
   id: uint8;
   name: string;
   description: string;
   capabilities: UartCapabilities;
   settings: UartSettings;
+  // Absent if the port has no bridge (e.g. the console).
+  bridge: BridgeSettings;
+  bridge_status: BridgeStatus;
 }
 
 // GET /api/uart/ports.

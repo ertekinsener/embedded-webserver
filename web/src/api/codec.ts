@@ -4,6 +4,7 @@
 
 import * as flatbuffers from 'flatbuffers';
 
+import { BridgeSettingsT } from '@api/bridge-settings';
 import { LoginRequestT } from '@api/login-request';
 import { LoginResponse, LoginResponseT } from '@api/login-response';
 import { SystemInfo, SystemInfoT } from '@api/system-info';
@@ -11,6 +12,8 @@ import { UartPortT } from '@api/uart-port';
 import { UartPortList } from '@api/uart-port-list';
 import { UartSettingsT } from '@api/uart-settings';
 
+export { BridgeSettingsT } from '@api/bridge-settings';
+export { BridgeStatusT } from '@api/bridge-status';
 export { FlowControl } from '@api/flow-control';
 export { Oversampling } from '@api/oversampling';
 export { Parity } from '@api/parity';
@@ -44,6 +47,10 @@ export function encodeLoginRequest(username: string, password: string): Uint8Arr
 }
 
 export function encodeUartSettings(settings: UartSettingsT): Uint8Array {
+  return finish(settings);
+}
+
+export function encodeBridgeSettings(settings: BridgeSettingsT): Uint8Array {
   return finish(settings);
 }
 

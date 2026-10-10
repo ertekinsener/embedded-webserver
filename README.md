@@ -54,6 +54,12 @@ errors are a status code with a short `text/plain` reason.
 | `GET /api/system/info` | session | - | 200 `SystemInfo` |
 | `GET /api/uart/ports` | session | - | 200 `UartPortList` (capabilities + settings of every port) |
 | `POST /api/uart/config` | session | `UartSettings` | 204; 404 unknown port; 422 unsupported or refused by the hardware |
+| `POST /api/bridge/config` | session | `BridgeSettings` | 204; 404 unknown port; 422 no bridge on the port, TCP port < 1024 or used by another bridge, values out of range |
+
+`GET /api/uart/ports` also carries each port's Ethernet bridge settings and
+status (`bridge`, `bridge_status`; absent for ports without bridge). A
+platform offers a bridge by setting `UartPort::bridge_driver`
+(docs/bridge/README.md; the CM7 firmware's is `bridge::TcpBridge`).
 
 A session is `Authorization: Bearer <32 hex digits>` (16 bytes from the
 platform's random source). Sessions live in RAM (at most 4, least recently

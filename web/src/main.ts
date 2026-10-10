@@ -7,7 +7,7 @@
 
 import { ApiError, api, setSessionLostHandler } from './api/client';
 import { session } from './api/session';
-import { portName } from './format';
+import { formatIpv4, portName } from './format';
 import { h, replaceChildren } from './ui/dom';
 import { icon } from './ui/icons';
 import { showToast } from './ui/toast';
@@ -116,7 +116,13 @@ async function render(): Promise<void> {
     if (port) {
       replaceChildren(
         root,
-        shellView(current, route, `${portName(port)} settings`, uartPortView(port, refresh), actions),
+        shellView(
+          current,
+          route,
+          `${portName(port)} settings`,
+          uartPortView(port, formatIpv4(current.system.ipv4Address), refresh),
+          actions,
+        ),
       );
       return;
     }

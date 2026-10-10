@@ -13,7 +13,7 @@ namespace {
 // Upper bounds of the encoded sizes (checked by the host tests), so the
 // port list never outgrows the response buffer (see FlatBufferArena).
 constexpr std::size_t kListBytes = 64;
-constexpr std::size_t kPortBytes = 320;  // Plus the two strings.
+constexpr std::size_t kPortBytes = 384;  // Plus the two strings.
 constexpr std::size_t kMaxPorts = 16;
 
 std::size_t EstimateListSize(std::span<const UartPort> ports) noexcept {
@@ -67,8 +67,44 @@ flatbuffers::Offset<api::UartPort> CreatePort(
       static_cast<api::FlowControl>(config.flow_control),
       static_cast<api::Oversampling>(config.oversampling),
       config.fifo_enabled, config.tx_rx_swap);
+  if (port.bridge_driver.apply == nullptr) {
+    return api::CreateUartPort(builder, port.id, name, description,
+                               capabilities, settings);
+  }
+  const UartBridgeSettings& bridge = port.bridge;
+  const auto bridge_settings = api::CreateBridgeSettings(
+      builder, port.id, bridge.enabled, bridge.tcp_port, bridge.idle_gap_ms,
+      bridge.max_frame);
+  UartBridgeStatus status;
+  if (port.bridge_driver.status != nullptr) {
+    port.bridge_driver.status(port.bridge_driver.context, port.id, status);
+  }
+  const auto client_address = builder.CreateVector(
+      status.client_address.data(),
+      status.connected ? status.client_address.size() : 0);
+  const auto bridge_status = api::CreateBridgeStatus(
+      builder, status.listening, status.connected, client_address,
+      status.client_port, status.uart_to_net_bytes, status.net_to_uart_bytes,
+      status.dropped_bytes, status.uart_errors);
   return api::CreateUartPort(builder, port.id, name, description,
-                             capabilities, settings);
+                             capabilities, settings, bridge_settings,
+                             bridge_status);
+}
+
+void SendError(UartError error, HttpResponse& response) noexcept {
+  switch (error) {
+    case UartError::kUnknownPort:
+      response.SetText(HttpStatus::kNotFound, "Unknown port");
+      return;
+    case UartError::kUnsupported:
+      response.SetText(HttpStatus::kUnprocessableEntity,
+                       "Settings not supported by this port");
+      return;
+    case UartError::kRejected:
+      response.SetText(HttpStatus::kUnprocessableEntity,
+                       "Settings rejected by the hardware");
+      return;
+  }
 }
 
 }  // namespace
@@ -109,23 +145,29 @@ void UartApi::SetConfig(const HttpRequest& request,
       .tx_rx_swap = settings->tx_rx_swap(),
   };
   const auto result = service_.Apply(config);
-  if (result) {
-    response.SetEmpty(HttpStatus::kNoContent);
+  if (!result) {
+    SendError(result.error(), response);
     return;
   }
-  switch (result.error()) {
-    case UartError::kUnknownPort:
-      response.SetText(HttpStatus::kNotFound, "Unknown port");
-      return;
-    case UartError::kUnsupported:
-      response.SetText(HttpStatus::kUnprocessableEntity,
-                       "Settings not supported by this port");
-      return;
-    case UartError::kRejected:
-      response.SetText(HttpStatus::kUnprocessableEntity,
-                       "Settings rejected by the hardware");
-      return;
+  response.SetEmpty(HttpStatus::kNoContent);
+}
+
+void UartApi::SetBridge(const HttpRequest& request,
+                        HttpResponse& response) noexcept {
+  const auto* bridge = DecodeRequest<api::BridgeSettings>(request, response);
+  if (bridge == nullptr) {
+    return;
   }
+  const auto result = service_.ApplyBridge(
+      bridge->port_id(), {.enabled = bridge->enabled(),
+                          .tcp_port = bridge->tcp_port(),
+                          .idle_gap_ms = bridge->idle_gap_ms(),
+                          .max_frame = bridge->max_frame()});
+  if (!result) {
+    SendError(result.error(), response);
+    return;
+  }
+  response.SetEmpty(HttpStatus::kNoContent);
 }
 
 }  // namespace webserver

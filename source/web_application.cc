@@ -22,6 +22,8 @@ WebApplication::WebApplication(const WebApplicationConfig& config) noexcept
            BindHandler<&UartApi::ListPorts>(uart_api_)},
           {HttpMethod::kPost, "/api/uart/config", Access::kSession,
            BindHandler<&UartApi::SetConfig>(uart_api_)},
+          {HttpMethod::kPost, "/api/bridge/config", Access::kSession,
+           BindHandler<&UartApi::SetBridge>(uart_api_)},
       }},
       router_(routes_,
               {[](void* context, const HttpRequest& request) noexcept {

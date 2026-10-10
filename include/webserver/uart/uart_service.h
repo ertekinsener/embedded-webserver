@@ -25,10 +25,17 @@ class UartService {
 
   std::expected<void, UartError> Apply(const UartConfig& config) noexcept;
 
+  // kUnsupported also for a port without bridge, values out of range or a
+  // TCP port another enabled bridge uses.
+  std::expected<void, UartError> ApplyBridge(
+      std::uint8_t port_id, const UartBridgeSettings& settings) noexcept;
+
   std::span<const UartPort> ports() const noexcept { return ports_; }
 
  private:
   UartPort* Find(std::uint8_t id) noexcept;
+  bool TcpPortInUse(const UartPort& except,
+                    std::uint16_t tcp_port) const noexcept;
 
   std::span<UartPort> ports_;
 };

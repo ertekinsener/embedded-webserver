@@ -231,9 +231,18 @@ void TestHeaders() {
             std::string_view("Content-Encoding: gzip\r\n"
                              "Cache-Control: no-store\r\n"
                              "X-Content-Type-Options: nosniff\r\n"));
+  // NUL-terminated after the returned text, whatever the buffer held (NetX
+  // checks strlen() against the length).
+  buffer.fill('x');
+  const std::string_view text = http::FormatExtraHeaders(response, buffer);
+  EXPECT_EQ(buffer[text.size()], '\0');
   std::array<char, 30> small;
-  EXPECT_EQ(http::FormatExtraHeaders(response, small),
-            std::string_view("Content-Encoding: gzip\r\n"));
+  small.fill('x');
+  const std::string_view first = http::FormatExtraHeaders(response, small);
+  EXPECT_EQ(first, std::string_view("Content-Encoding: gzip\r\n"));
+  EXPECT_EQ(small[first.size()], '\0');
+  std::array<char, 24> exact;  // No room for the terminator: left out.
+  EXPECT_TRUE(http::FormatExtraHeaders(response, exact).empty());
   EXPECT_EQ(webserver::StatusLine(HttpStatus::kUnprocessableEntity),
             std::string_view("422 Unprocessable Entity"));
 }
@@ -292,6 +301,16 @@ std::vector<std::uint8_t> SettingsBody(std::uint8_t port, std::uint32_t baud,
                                            api::WordLength::Bits_8) {
   flatbuffers::FlatBufferBuilder builder;
   builder.Finish(api::CreateUartSettings(builder, port, baud, word_length));
+  return Finished(builder);
+}
+
+std::vector<std::uint8_t> BridgeBody(std::uint8_t port, bool enabled,
+                                     std::uint16_t tcp_port,
+                                     std::uint16_t idle_gap_ms = 0,
+                                     std::uint16_t max_frame = 1024) {
+  flatbuffers::FlatBufferBuilder builder;
+  builder.Finish(api::CreateBridgeSettings(builder, port, enabled, tcp_port,
+                                           idle_gap_ms, max_frame));
   return Finished(builder);
 }
 
@@ -425,6 +444,37 @@ void TestApplication() {
                 .status,
             HttpStatus::kUnprocessableEntity);
 
+  // Bridge: SIM1 starts bridged on TCP 4001; SIM3 has no bridge.
+  if (ports != nullptr) {
+    const api::UartPort* sim1 = ports->ports()->Get(0);
+    EXPECT_TRUE(sim1->bridge() != nullptr && sim1->bridge()->enabled() &&
+                sim1->bridge()->tcp_port() == 4001);
+    EXPECT_TRUE(sim1->bridge_status() != nullptr &&
+                sim1->bridge_status()->listening());
+    EXPECT_TRUE(ports->ports()->Get(2)->bridge() == nullptr);
+  }
+  const auto bridge = [&](std::vector<std::uint8_t> body) {
+    return client.Send(HttpMethod::kPost, "/api/bridge/config", body).status;
+  };
+  EXPECT_EQ(bridge(BridgeBody(2, true, 4002, 20, 512)), HttpStatus::kNoContent);
+  EXPECT_EQ(host::SimulatedPorts()[1].bridge.tcp_port, 4002);
+  EXPECT_EQ(host::SimulatedPorts()[1].bridge.idle_gap_ms, 20);
+  EXPECT_EQ(bridge(BridgeBody(2, true, 4001)),  // SIM1's port.
+            HttpStatus::kUnprocessableEntity);
+  EXPECT_EQ(bridge(BridgeBody(2, true, 80)), HttpStatus::kUnprocessableEntity);
+  EXPECT_EQ(bridge(BridgeBody(2, true, 4002, 1001)),
+            HttpStatus::kUnprocessableEntity);
+  EXPECT_EQ(bridge(BridgeBody(2, true, 4002, 0, 1461)),
+            HttpStatus::kUnprocessableEntity);
+  EXPECT_EQ(bridge(BridgeBody(3, true, 4003)),
+            HttpStatus::kUnprocessableEntity);
+  EXPECT_EQ(bridge(BridgeBody(9, true, 4009)), HttpStatus::kNotFound);
+  // Disabled bridges do not hold their TCP port.
+  EXPECT_EQ(bridge(BridgeBody(1, false, 4001)), HttpStatus::kNoContent);
+  EXPECT_EQ(bridge(BridgeBody(2, true, 4001)), HttpStatus::kNoContent);
+  EXPECT_EQ(host::SimulatedPorts()[1].bridge.tcp_port, 4001);
+  EXPECT_EQ(bridge(BridgeBody(2, false, 0)), HttpStatus::kNoContent);
+
   // Logout ends the session.
   EXPECT_EQ(client.Send(HttpMethod::kPost, "/api/auth/logout").status,
             HttpStatus::kNoContent);
@@ -469,12 +519,36 @@ void TestPortListBound() {
                              .fifo_enabled = true,
                              .tx_rx_swap = true}};
     }
+    for (webserver::UartPort& port : ports) {
+      port.bridge_driver = {
+          .apply = [](void*, std::uint8_t,
+                      const webserver::UartBridgeSettings&) noexcept {
+            return true;
+          },
+          .status = [](void*, std::uint8_t,
+                       webserver::UartBridgeStatus& status) noexcept {
+            status = {.listening = true,
+                      .connected = true,
+                      .client_address = {255, 255, 255, 255},
+                      .client_port = 65535,
+                      .uart_to_net_bytes = 0xFFFFFFFF,
+                      .net_to_uart_bytes = 0xFFFFFFFF,
+                      .dropped_bytes = 0xFFFFFFFF,
+                      .uart_errors = 0xFFFFFFFF};
+            return true;
+          },
+          .context = nullptr};
+      port.bridge = {.enabled = true,
+                     .tcp_port = 65535,
+                     .idle_gap_ms = 1000,
+                     .max_frame = 1460};
+    }
     webserver::UartService service(ports);
     webserver::UartApi uart_api(service);
     HttpResponse response;
     uart_api.ListPorts({}, response);
     const std::size_t bound =
-        64 + count * (320 + name.size() + description.size());
+        64 + count * (384 + name.size() + description.size());
     if (bound > response.buffer().size()) {
       EXPECT_EQ(response.status, HttpStatus::kInternalError);
       continue;

@@ -17,12 +17,13 @@
 // Every API path, for HTTP servers that register paths up front (Zephyr):
 // expands X(<args>..., n, path) per path. Must list every route of
 // WebApplication (checked by the host tests).
-#define WEBSERVER_API_PATHS(X, ...)          \
-  X(__VA_ARGS__, 0, "/api/auth/login")       \
-  X(__VA_ARGS__, 1, "/api/auth/logout")      \
-  X(__VA_ARGS__, 2, "/api/system/info")      \
-  X(__VA_ARGS__, 3, "/api/uart/ports")       \
-  X(__VA_ARGS__, 4, "/api/uart/config")
+#define WEBSERVER_API_PATHS(X, ...)      \
+  X(__VA_ARGS__, 0, "/api/auth/login")   \
+  X(__VA_ARGS__, 1, "/api/auth/logout")  \
+  X(__VA_ARGS__, 2, "/api/system/info")  \
+  X(__VA_ARGS__, 3, "/api/uart/ports")   \
+  X(__VA_ARGS__, 4, "/api/uart/config")  \
+  X(__VA_ARGS__, 5, "/api/bridge/config")
 
 namespace webserver {
 
@@ -59,7 +60,7 @@ class WebApplication {
   auth::AuthApi auth_api_;
   UartApi uart_api_;
   SystemApi system_api_;
-  std::array<ApiRouter::Route, 5> routes_;
+  std::array<ApiRouter::Route, 6> routes_;
   ApiRouter router_;
   HttpServer server_;
 };

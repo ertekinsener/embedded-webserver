@@ -1,6 +1,7 @@
 #ifndef WEBSERVER_INCLUDE_WEBSERVER_UART_UART_TYPES_
 #define WEBSERVER_INCLUDE_WEBSERVER_UART_UART_TYPES_
 
+#include <array>
 #include <cstdint>
 #include <initializer_list>
 #include <string_view>
@@ -107,6 +108,46 @@ struct UartPortDriver {
   void* context = nullptr;
 };
 
+// Ethernet bridge of a port: a raw TCP server that passes data between one
+// client and the UART (docs/bridge/README.md).
+struct UartBridgeSettings {
+  bool enabled = false;
+  std::uint16_t tcp_port = 0;
+  // 0: send UART data when the line goes idle; else this long after the
+  // last byte, merging frames.
+  std::uint16_t idle_gap_ms = 0;
+  std::uint16_t max_frame = 1024;  // Bytes per TCP segment at most.
+};
+
+// Limits UartService checks; ports below 1024 (e.g. HTTP) are not offered.
+inline constexpr std::uint16_t kMinBridgeTcpPort = 1024;
+inline constexpr std::uint16_t kMaxBridgeIdleGapMs = 1000;
+inline constexpr std::uint16_t kMaxBridgeFrame = 1460;
+
+struct UartBridgeStatus {
+  bool listening = false;
+  bool connected = false;
+  std::array<std::uint8_t, 4> client_address{};
+  std::uint16_t client_port = 0;
+  std::uint32_t uart_to_net_bytes = 0;
+  std::uint32_t net_to_uart_bytes = 0;
+  std::uint32_t dropped_bytes = 0;  // UART data with no client to take it.
+  std::uint32_t uart_errors = 0;
+};
+
+// The platform's bridge for a port; `apply` == nullptr: the port has none.
+// Called from the HTTP server thread.
+struct UartBridgeDriver {
+  using Apply = bool (*)(void* context, std::uint8_t port_id,
+                         const UartBridgeSettings& settings) noexcept;
+  using GetStatus = bool (*)(void* context, std::uint8_t port_id,
+                             UartBridgeStatus& status) noexcept;
+
+  Apply apply = nullptr;
+  GetStatus status = nullptr;
+  void* context = nullptr;
+};
+
 // One port offered by the web UI, owned by the platform's application code.
 struct UartPort {
   std::uint8_t id;
@@ -116,6 +157,8 @@ struct UartPort {
   UartPortDriver driver;
   // The settings the port runs with; updated by UartService.
   UartConfig config;
+  UartBridgeDriver bridge_driver{};
+  UartBridgeSettings bridge{};  // Updated by UartService.
 };
 
 }  // namespace webserver
