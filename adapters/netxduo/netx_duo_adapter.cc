@@ -16,9 +16,18 @@
 namespace webserver::netx_duo {
 namespace {
 
-// Body bytes per packet sent. Big files go out in several packets, so the
-// HTTP packet pool never has to hold a whole file.
-constexpr std::size_t kSendChunkSize = 2048;
+// Body bytes for `packet`: what still fits into it and into one TCP segment.
+// A packet longer than the MSS would be split by NetX into a second packet
+// from the same pool, and one that overflows its buffer would be chained;
+// both cost packets the small HTTP pool does not have to spare.
+std::size_t ChunkSize(const NX_PACKET& packet, ULONG mss,
+                      std::size_t remaining) noexcept {
+  const auto room = static_cast<std::size_t>(packet.nx_packet_data_end -
+                                             packet.nx_packet_append_ptr);
+  const std::size_t segment_room =
+      mss > packet.nx_packet_length ? mss - packet.nx_packet_length : 0;
+  return std::min({remaining, room, segment_room});
+}
 
 // The request notify callback gets NX_WEB_HTTP_SERVER_*_REQUEST values, not
 // NX_WEB_HTTP_METHOD_* (where 2 means PUT, not POST).
@@ -151,11 +160,13 @@ UINT Adapter::SendResponse(NX_WEB_HTTP_SERVER* server) noexcept {
     return status;
   }
   NX_PACKET_POOL* const pool = server->nx_web_http_server_packet_pool_ptr;
-  // The first packet carries the header (and nothing else for an empty
-  // body); every further one up to kSendChunkSize body bytes.
+  const ULONG mss = server->nx_web_http_server_current_session_ptr
+                        ->nx_tcp_session_socket.nx_tcp_socket_connect_mss;
+  // The first packet carries the header and the start of the body, every
+  // further one the next segment's worth.
   while (true) {
     const std::span<const std::uint8_t> chunk =
-        body.first(std::min(body.size(), kSendChunkSize));
+        body.first(ChunkSize(*packet, mss, body.size()));
     if (!chunk.empty()) {
       status = nx_packet_data_append(
           packet, const_cast<std::uint8_t*>(chunk.data()),
