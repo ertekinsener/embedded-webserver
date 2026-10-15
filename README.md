@@ -12,7 +12,8 @@ code runs on
 
 Diagrams: `docs/webserver/webserver_components.puml` (structure),
 `webserver_request_sequence.puml` (login and settings),
-`web_ui_build.puml` (UI build).
+`web_ui_build.puml` (UI build), `docs/storage/settings_storage.puml` (saved
+settings).
 
 ## Layout
 
@@ -29,7 +30,8 @@ webserver/
 
 - `WebApplication` wires everything: `ResourceRegistry` (embedded files),
   `ApiRouter` (exact path + method, 404/405, `Access::kSession` routes need a
-  session), `AuthApi`/`SessionManager`, `UartApi`/`UartService`, `SystemApi`.
+  session), `AuthApi`/`SessionManager`, `UartApi`/`UartService`, `SystemApi`,
+  `SettingsApi`/`SettingsStore`.
 - `HttpServer` sees only `HttpRequest`/`HttpResponse`. An adapter copies a
   request into its own buffers (headers <= 2 KiB, body <= 512 B,
   `kMaxRequest*Size`) and sends the response; the response body is built in
@@ -51,10 +53,15 @@ errors are a status code with a short `text/plain` reason.
 |---|---|---|---|
 | `POST /api/auth/login` | public | `LoginRequest` | 200 `LoginResponse {token, idle_timeout_s}`, 401, 429 |
 | `POST /api/auth/logout` | session | - | 204 |
+| `POST /api/auth/password` | session | `ChangePasswordRequest {current_password, new_password}` | 204 (other sessions end); 403 wrong current password; 422 new one not 8..64 bytes; 429 locked out; 500 changed but not saved |
 | `GET /api/system/info` | session | - | 200 `SystemInfo` |
 | `GET /api/uart/ports` | session | - | 200 `UartPortList` (capabilities + settings of every port) |
 | `POST /api/uart/config` | session | `UartSettings` | 204; 404 unknown port; 422 unsupported or refused by the hardware |
 | `POST /api/bridge/config` | session | `BridgeSettings` (mode: TCP server, RFC 2217, TCP client, UDP; local/remote endpoint; flush rules) | 204; 404 unknown port; 422 no bridge on the port, local port < 1024 or used by another bridge, client without remote, values out of range |
+| `POST /api/settings/reset` | session | - | 204 saved settings deleted (defaults after the next start); 501 the platform saves nothing |
+
+`/api/uart/config`, `/api/bridge/config` and `/api/auth/password` answer 500
+when the change was applied but saving it failed.
 
 `GET /api/uart/ports` also carries each port's Ethernet bridge settings and
 status (`bridge`, `bridge_status`; absent for ports without bridge). A
@@ -74,6 +81,34 @@ The login is configured at build time: `WEBSERVER_ADMIN_USER`,
 `WEBSERVER_PASSWORD_ITERATIONS` (4096). Only a PBKDF2-HMAC-SHA-256 key of the
 password with a random per-build-directory salt goes into the firmware. Plain
 HTTP sends the password in clear text: use the device on a trusted network.
+The password (not the user name) can be changed on the UI's Account page:
+`SessionManager` derives a new key with a fresh 16-byte salt and the same
+iterations, and keeps it in RAM or, with a settings storage, saves it.
+
+### Saved settings
+
+`SettingsStore` saves what the web UI changed as a `SavedSettings`
+FlatBuffer (`schema/settings.fbs`, at most `SettingsStore::kMaxSize` =
+1.5 KiB for 16 ports, host-tested): the settings of every port changed from
+the UI (`UartPort::saved_config`), the bridge settings of every port with a
+bridge, and the password key once it was changed. It saves after every
+successful `/api/uart/config`, `/api/bridge/config` and `/api/auth/password`,
+building the FlatBuffer in the response buffer (no extra RAM). Line settings
+an RFC 2217 client sets go through `UartService::ApplyTemporary()` and are
+not saved.
+
+The platform passes a `SettingsStorage {load, save, erase}`
+(`WebApplicationConfig::settings_storage`) and calls
+`web.settings().Restore(buffer)` once its ports and bridges take settings;
+settings a port refuses by then (other capabilities after an update) are
+skipped. Without a storage everything works, but only until a restart
+(`SystemInfo::settings_saved` tells the UI).
+
+| Platform | Storage |
+|---|---|
+| CM7 firmware | `storage::FlashLog` in flash bank 2, sectors 6 and 7 (`CM7/app/source/app/settings_storage.cc`, docs/storage/README.md); B1 held at reset deletes it |
+| PC | `webserver_host [port [settings-file]]`, in memory without a file |
+| Zephyr | none yet (docs/TODO.md) |
 
 ### Multi-platform UART support
 
@@ -95,8 +130,8 @@ the same UI shows
 ## Web UI
 
 `web/` is a TypeScript single-page app without a framework: login, a side
-menu (drawer on phones) with an overview, one settings page per port and a
-device page. The API code uses the classes `flatc --ts --gen-object-api`
+menu (drawer on phones) with an overview, one settings page per port, a
+device page and an account page (password, saved settings). The API code uses the classes `flatc --ts --gen-object-api`
 generates from `schema/*.fbs` and the FlatBuffers TypeScript runtime of the
 `external/flatbuffers` submodule (so it always matches `flatc`). Tailwind is
 compiled at build time and icons are inline SVG (Font Awesome Free), so the
@@ -123,10 +158,12 @@ build/webserver-host/webserver_host 8080      # http://localhost:8080, admin/adm
 ```
 
 - `webserver_test`: SHA-256/HMAC/PBKDF2 test vectors, sessions (timeout,
-  lockout, eviction), header parsing, routing, every API status code, the
-  port list size bound, and that `WEBSERVER_API_PATHS` lists every route.
+  lockout, eviction, password change), header parsing, routing, every API
+  status code, saving and restoring settings, the port list and saved
+  settings size bounds, and that `WEBSERVER_API_PATHS` lists every route.
 - `webserver_ui_smoke_test`: the UI's TypeScript API code against the running
-  C++ server (login, ports, settings, logout). Against any device:
+  C++ server (login, ports, settings, password, saved settings across server
+  restarts, logout). Against any device:
   `node web/scripts/smoke_test.mjs --url http://192.168.1.1 --out <build>/webserver_generated/web`.
 
 ## Porting to another platform
@@ -137,7 +174,8 @@ build/webserver-host/webserver_host 8080      # http://localhost:8080, admin/adm
    headers of `http::FormatExtraHeaders()`, `body()`).
    `http_headers.h` parses raw header blocks.
 2. Provide `Platform {now_ms, random}` (a cryptographically secure source),
-   a `SystemDescription` and a `UartPort` table with drivers.
+   a `SystemDescription` and a `UartPort` table with drivers; optionally a
+   `SettingsStorage` (then call `settings().Restore()` at start).
 3. `webserver_add(<target> ADAPTER <name>)` in CMake (add the adapter to
    `webserver.cmake`), and the logger front end (`shared/source/logging/`)
    with a sink.

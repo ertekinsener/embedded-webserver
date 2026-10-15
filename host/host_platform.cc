@@ -3,9 +3,13 @@
 #include <sys/random.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <span>
+#include <string>
+#include <vector>
 
 #include "logging/logger.h"
 
@@ -43,6 +47,57 @@ bool Network(webserver::NetworkInfo& info) noexcept {
   return true;
 }
 
+struct SettingsFile {
+  const char* path = nullptr;  // nullptr: `memory` only.
+  std::vector<std::uint8_t> memory;
+};
+
+SettingsFile settings_file;
+
+std::size_t LoadSettings(void* context,
+                         std::span<std::uint8_t> buffer) noexcept {
+  auto& file = *static_cast<SettingsFile*>(context);
+  if (file.path == nullptr) {
+    if (file.memory.size() > buffer.size()) {
+      return 0;
+    }
+    std::copy(file.memory.begin(), file.memory.end(), buffer.begin());
+    return file.memory.size();
+  }
+  std::FILE* stream = std::fopen(file.path, "rb");
+  if (stream == nullptr) {
+    return 0;
+  }
+  const std::size_t size = std::fread(buffer.data(), 1, buffer.size(), stream);
+  const bool complete = std::feof(stream) != 0;
+  std::fclose(stream);
+  return complete ? size : 0;
+}
+
+bool SaveSettings(void* context, std::span<const std::uint8_t> data) noexcept {
+  auto& file = *static_cast<SettingsFile*>(context);
+  if (file.path == nullptr) {
+    file.memory.assign(data.begin(), data.end());
+    return true;
+  }
+  const std::string temporary = std::string(file.path) + ".tmp";
+  std::FILE* stream = std::fopen(temporary.c_str(), "wb");
+  if (stream == nullptr) {
+    return false;
+  }
+  const bool written =
+      std::fwrite(data.data(), 1, data.size(), stream) == data.size();
+  return std::fclose(stream) == 0 && written &&
+         std::rename(temporary.c_str(), file.path) == 0;
+}
+
+bool EraseSettings(void* context) noexcept {
+  auto& file = *static_cast<SettingsFile*>(context);
+  file.memory.clear();
+  return file.path == nullptr || std::remove(file.path) == 0 ||
+         access(file.path, F_OK) != 0;
+}
+
 }  // namespace
 
 void InitLogging() noexcept {
@@ -59,6 +114,14 @@ void InitLogging() noexcept {
 
 webserver::Platform HostPlatform() noexcept {
   return {.now_ms = &NowMs, .random = &Random};
+}
+
+webserver::SettingsStorage HostSettingsStorage(const char* path) noexcept {
+  settings_file.path = path;
+  return {.load = &LoadSettings,
+          .save = &SaveSettings,
+          .erase = &EraseSettings,
+          .context = &settings_file};
 }
 
 webserver::SystemDescription HostSystem() noexcept {

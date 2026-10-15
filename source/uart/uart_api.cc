@@ -1,12 +1,12 @@
 #include "webserver/uart/uart_api.h"
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 
 #include "uart_generated.h"
 #include "webserver/flatbuffer_io.h"
+#include "webserver/uart/uart_codec.h"
 
 namespace webserver {
 namespace {
@@ -15,7 +15,6 @@ namespace {
 // port list never outgrows the response buffer (see FlatBufferArena).
 constexpr std::size_t kListBytes = 64;
 constexpr std::size_t kPortBytes = 384;  // Plus the two strings.
-constexpr std::size_t kMaxPorts = 16;
 
 std::size_t EstimateListSize(std::span<const UartPort> ports) noexcept {
   std::size_t size = kListBytes;
@@ -59,27 +58,13 @@ flatbuffers::Offset<api::UartPort> CreatePort(
       stop_bits, parities, flow_controls, oversampling, caps.fifo,
       caps.tx_rx_swap);
 
-  const UartConfig& config = port.config;
-  const auto settings = api::CreateUartSettings(
-      builder, port.id, config.baud_rate,
-      static_cast<api::WordLength>(config.word_length),
-      static_cast<api::StopBits>(config.stop_bits),
-      static_cast<api::Parity>(config.parity),
-      static_cast<api::FlowControl>(config.flow_control),
-      static_cast<api::Oversampling>(config.oversampling),
-      config.fifo_enabled, config.tx_rx_swap);
+  const auto settings = CreateUartSettings(builder, port.id, port.config);
   if (port.bridge_driver.apply == nullptr) {
     return api::CreateUartPort(builder, port.id, name, description,
                                capabilities, settings);
   }
-  const UartBridgeSettings& bridge = port.bridge;
-  const auto remote_address = builder.CreateVector(
-      bridge.remote_address.data(), bridge.remote_address.size());
-  const auto bridge_settings = api::CreateBridgeSettings(
-      builder, port.id, bridge.enabled,
-      static_cast<api::BridgeMode>(bridge.mode), bridge.local_port,
-      remote_address, bridge.remote_port, bridge.idle_gap_ms,
-      bridge.max_frame, bridge.use_delimiter, bridge.delimiter);
+  const auto bridge_settings =
+      CreateBridgeSettings(builder, port.id, port.bridge);
   UartBridgeStatus status;
   if (port.bridge_driver.status != nullptr) {
     port.bridge_driver.status(port.bridge_driver.context, port.id, status);
@@ -118,13 +103,13 @@ void UartApi::ListPorts(const HttpRequest& /*request*/,
                         HttpResponse& response) noexcept {
   const UartService::Guard guard = service_.Locked();
   const std::span<const UartPort> ports = service_.ports();
-  if (ports.size() > kMaxPorts ||
+  if (ports.size() > kMaxUartPorts ||
       EstimateListSize(ports) > response.buffer().size()) {
     response.SetText(HttpStatus::kInternalError, "Port list too large");
     return;
   }
   ResponseBuilder out(response);
-  std::array<flatbuffers::Offset<api::UartPort>, kMaxPorts> offsets{};
+  std::array<flatbuffers::Offset<api::UartPort>, kMaxUartPorts> offsets{};
   for (std::size_t i = 0; i < ports.size(); ++i) {
     offsets[i] = CreatePort(out.builder, ports[i]);
   }
@@ -139,23 +124,13 @@ void UartApi::SetConfig(const HttpRequest& request,
   if (settings == nullptr) {
     return;
   }
-  const UartConfig config{
-      .port_id = settings->port_id(),
-      .baud_rate = settings->baud_rate(),
-      .word_length = static_cast<UartWordLength>(settings->word_length()),
-      .stop_bits = static_cast<UartStopBits>(settings->stop_bits()),
-      .parity = static_cast<UartParity>(settings->parity()),
-      .flow_control = static_cast<UartFlowControl>(settings->flow_control()),
-      .oversampling = static_cast<UartOversampling>(settings->oversampling()),
-      .fifo_enabled = settings->fifo_enabled(),
-      .tx_rx_swap = settings->tx_rx_swap(),
-  };
+  const UartConfig config = ToUartConfig(*settings);
   const auto result = service_.Apply(config);
   if (!result) {
     SendError(result.error(), response);
     return;
   }
-  response.SetEmpty(HttpStatus::kNoContent);
+  Saved(response);
 }
 
 void UartApi::SetBridge(const HttpRequest& request,
@@ -164,28 +139,24 @@ void UartApi::SetBridge(const HttpRequest& request,
   if (bridge == nullptr) {
     return;
   }
-  UartBridgeSettings settings{
-      .enabled = bridge->enabled(),
-      // Range-checked by the service.
-      .mode = static_cast<UartBridgeMode>(bridge->mode()),
-      .local_port = bridge->local_port(),
-      .remote_port = bridge->remote_port(),
-      .idle_gap_ms = bridge->idle_gap_ms(),
-      .max_frame = bridge->max_frame(),
-      .use_delimiter = bridge->use_delimiter(),
-      .delimiter = bridge->delimiter(),
-  };
-  if (const auto* address = bridge->remote_address()) {
-    if (address->size() != settings.remote_address.size()) {
-      response.SetText(HttpStatus::kBadRequest, "Bad remote address");
-      return;
-    }
-    std::copy(address->begin(), address->end(),
-              settings.remote_address.begin());
+  const auto settings = ToBridgeSettings(*bridge);
+  if (!settings) {
+    response.SetText(HttpStatus::kBadRequest, "Bad remote address");
+    return;
   }
-  const auto result = service_.ApplyBridge(bridge->port_id(), settings);
+  const auto result = service_.ApplyBridge(bridge->port_id(), *settings);
   if (!result) {
     SendError(result.error(), response);
+    return;
+  }
+  Saved(response);
+}
+
+void UartApi::Saved(HttpResponse& response) noexcept {
+  if (settings_ != nullptr && settings_->available() &&
+      !settings_->Save(response.buffer())) {
+    response.SetText(HttpStatus::kInternalError,
+                     "Applied, but saving the settings failed");
     return;
   }
   response.SetEmpty(HttpStatus::kNoContent);

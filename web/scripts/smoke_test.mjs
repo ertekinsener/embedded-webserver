@@ -1,6 +1,7 @@
 // End-to-end check of the UI's API code (src/api/codec.ts, the generated
 // FlatBuffers TypeScript and runtime) against the C++ server: starts
-// webserver_host, then logs in, reads and changes UART settings over HTTP.
+// webserver_host, then logs in, reads and changes UART settings over HTTP,
+// changes the password and restarts the server to check what it saved.
 // Run by ctest in the host build (webserver/host/CMakeLists.txt):
 //
 //   node scripts/smoke_test.mjs --server <webserver_host> --out <UI build dir>
@@ -12,6 +13,9 @@
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { parseArgs } from 'node:util';
 
 import { loadCodec } from './load_codec.mjs';
@@ -42,10 +46,33 @@ async function waitForServer() {
 }
 
 const codec = await loadCodec(args.out);
-const server = simulated
-  ? spawn(args.server, [String(port)], { stdio: ['ignore', 'ignore', 'inherit'] })
-  : null;
+const settingsFile = path.join(os.tmpdir(), `webserver_smoke_${process.pid}.bin`);
+let server = null;
 let token = '';
+
+async function startServer() {
+  server = spawn(args.server, [String(port), settingsFile], {
+    stdio: ['ignore', 'ignore', 'inherit'],
+  });
+  await waitForServer();
+}
+
+// Like a reboot: what the server saved in settingsFile comes back.
+async function restartServer() {
+  const exited = new Promise((resolve) => server.once('exit', resolve));
+  server.kill();
+  await exited;
+  token = '';
+  await startServer();
+}
+
+async function login(user, password) {
+  const response = await call('POST', '/api/auth/login', codec.encodeLoginRequest(user, password));
+  if (response.status === 200) {
+    token = codec.text(codec.decodeLoginResponse(response.data).token);
+  }
+  return response.status;
+}
 
 // The decoded body of a 200 answer.
 async function get(url, decode) {
@@ -63,7 +90,11 @@ async function call(method, url, body) {
 }
 
 try {
-  await waitForServer();
+  if (simulated) {
+    await startServer();
+  } else {
+    await waitForServer();
+  }
 
   const index = await fetch(`${base}/`);
   assert.equal(index.status, 200);
@@ -76,11 +107,7 @@ try {
     (await call('POST', '/api/auth/login', codec.encodeLoginRequest('admin', 'wrong'))).status,
     401,
   );
-  const login = await call(
-    'POST', '/api/auth/login', codec.encodeLoginRequest(args.user, args.password),
-  );
-  assert.equal(login.status, 200);
-  token = codec.text(codec.decodeLoginResponse(login.data).token);
+  assert.equal(await login(args.user, args.password), 200);
   assert.equal(token.length, 32);
 
   const info = await get('/api/system/info', codec.decodeSystemInfo);
@@ -145,6 +172,25 @@ try {
       (await call('POST', '/api/uart/config', codec.encodeUartSettings(settings))).status,
       422,
     );
+
+    // Saved settings: the password and SIM2's settings survive a restart,
+    // deleting them brings the defaults back.
+    assert.ok(info.settingsSaved);
+    const changePassword = (current, next) =>
+      call('POST', '/api/auth/password', codec.encodeChangePasswordRequest(current, next));
+    assert.equal((await changePassword('wrong', 'smoke password')).status, 403);
+    assert.equal((await changePassword(args.password, 'short')).status, 422);
+    assert.equal((await changePassword(args.password, 'smoke password')).status, 204);
+    await restartServer();
+    assert.equal(await login(args.user, args.password), 401);
+    assert.equal(await login(args.user, 'smoke password'), 200);
+    ports = await get('/api/uart/ports', codec.decodeUartPorts);
+    assert.equal(ports[1].settings.baudRate, 57600);
+    assert.equal((await call('POST', '/api/settings/reset')).status, 204);
+    await restartServer();
+    assert.equal(await login(args.user, args.password), 200);
+    ports = await get('/api/uart/ports', codec.decodeUartPorts);
+    assert.equal(ports[1].settings.baudRate, 115200);
   }
 
   assert.equal((await call('POST', '/api/auth/logout')).status, 204);
@@ -152,4 +198,5 @@ try {
   console.log('UI smoke test passed');
 } finally {
   server?.kill();
+  fs.rmSync(settingsFile, { force: true });
 }

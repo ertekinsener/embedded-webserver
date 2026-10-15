@@ -4,6 +4,7 @@
 //   #/overview    device summary and port list
 //   #/ports/<id>  settings of one UART port
 //   #/device      firmware and network details
+//   #/account     password and saved settings
 
 import { ApiError, api, setSessionLostHandler } from './api/client';
 import { session } from './api/session';
@@ -11,6 +12,7 @@ import { formatIpv4, portName } from './format';
 import { h, replaceChildren } from './ui/dom';
 import { icon } from './ui/icons';
 import { showToast } from './ui/toast';
+import { accountView } from './views/account';
 import { deviceView } from './views/device';
 import { loginView } from './views/login';
 import { overviewView } from './views/overview';
@@ -129,6 +131,10 @@ async function render(): Promise<void> {
   }
   if (route === '#/device') {
     replaceChildren(root, shellView(current, route, 'Device', deviceView(current), actions));
+    return;
+  }
+  if (route === '#/account') {
+    replaceChildren(root, shellView(current, route, 'Account', accountView(current), actions));
     return;
   }
   if (route !== '#/overview') {

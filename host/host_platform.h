@@ -4,6 +4,7 @@
 #include <span>
 
 #include "webserver/platform.h"
+#include "webserver/settings/settings_store.h"
 #include "webserver/system/system_api.h"
 #include "webserver/uart/uart_types.h"
 
@@ -16,6 +17,10 @@ void InitLogging() noexcept;
 webserver::Platform HostPlatform() noexcept;
 
 webserver::SystemDescription HostSystem() noexcept;
+
+// Saved settings in the file `path` (replaced atomically on each save), or
+// in memory (lost on exit) for nullptr.
+webserver::SettingsStorage HostSettingsStorage(const char* path) noexcept;
 
 // Simulated ports with different capabilities, so the UI can be tried with
 // what different platforms offer (simulated_ports.cc).

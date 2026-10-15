@@ -35,6 +35,7 @@ enum class HttpStatus : std::uint16_t {
   kNoContent = 204,
   kBadRequest = 400,
   kUnauthorized = 401,
+  kForbidden = 403,
   kNotFound = 404,
   kMethodNotAllowed = 405,
   kPayloadTooLarge = 413,
@@ -42,6 +43,7 @@ enum class HttpStatus : std::uint16_t {
   kUnprocessableEntity = 422,
   kTooManyRequests = 429,
   kInternalError = 500,
+  kNotImplemented = 501,
   kServiceUnavailable = 503,
 };
 

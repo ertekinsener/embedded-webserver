@@ -2,6 +2,7 @@
 // header parsing, routing, the FlatBuffers APIs and the size bounds that
 // keep responses inside the fixed buffers.
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -15,6 +16,7 @@
 #include "flatbuffers/flatbuffer_builder.h"
 #include "flatbuffers/verifier.h"
 #include "host_platform.h"
+#include "settings_generated.h"
 #include "system_generated.h"
 #include "uart_generated.h"
 #include "web_resources.h"
@@ -22,6 +24,7 @@
 #include "webserver/auth/session_manager.h"
 #include "webserver/auth/sha256.h"
 #include "webserver/http_headers.h"
+#include "webserver/settings/settings_store.h"
 #include "webserver/uart/uart_api.h"
 #include "webserver/uart/uart_service.h"
 #include "webserver/web_application.h"
@@ -205,6 +208,286 @@ void TestSessions() {
   EXPECT_TRUE(auth::BearerToken("Bearer").empty());
 }
 
+void TestPasswordChange() {
+  const auth::SessionPolicy policy{
+      .idle_timeout_ms = 100'000, .max_failures = 3, .lockout_ms = 500};
+  auth::SessionManager sessions(auth::BuildCredentials(), FakePlatform(),
+                                policy);
+  fake_now_ms = 0;
+  EXPECT_TRUE(!sessions.password_changed());
+  const auto mine = *sessions.Login("admin", "admin");
+  const auto other = *sessions.Login("admin", "admin");
+
+  EXPECT_EQ(sessions.ChangePassword("admin", "short", View(mine)).error(),
+            auth::PasswordError::kInvalidPassword);
+  EXPECT_EQ(sessions
+                .ChangePassword("admin", std::string(65, 'x'), View(mine))
+                .error(),
+            auth::PasswordError::kInvalidPassword);
+  EXPECT_EQ(sessions.ChangePassword("wrong", "new password", View(mine))
+                .error(),
+            auth::PasswordError::kWrongPassword);
+  EXPECT_TRUE(!sessions.password_changed());
+  EXPECT_TRUE(sessions.ChangePassword("admin", "new password", View(mine))
+                  .has_value());
+  EXPECT_TRUE(sessions.password_changed());
+  // Only the session that changed it survives.
+  EXPECT_TRUE(sessions.Validate(View(mine)));
+  EXPECT_TRUE(!sessions.Validate(View(other)));
+  EXPECT_EQ(sessions.Login("admin", "admin").error(),
+            auth::LoginError::kInvalidCredentials);
+  EXPECT_TRUE(sessions.Login("admin", "new password").has_value());
+  // Same iterations and key size, new salt.
+  const auth::Credentials& now = sessions.credentials();
+  EXPECT_EQ(now.iterations, auth::BuildCredentials().iterations);
+  EXPECT_EQ(now.derived_key.size(), auth::BuildCredentials().derived_key.size());
+  EXPECT_EQ(now.salt.size(), 16U);
+
+  // Wrong current passwords count towards the lockout.
+  for (int i = 0; i < 3; ++i) {
+    static_cast<void>(
+        sessions.ChangePassword("bad", "another password", View(mine)));
+  }
+  EXPECT_EQ(sessions.Login("admin", "new password").error(),
+            auth::LoginError::kLockedOut);
+  EXPECT_EQ(sessions
+                .ChangePassword("new password", "another password",
+                                View(mine))
+                .error(),
+            auth::PasswordError::kLockedOut);
+  fake_now_ms += 500;
+
+  // A key from saved settings; out-of-range ones change nothing.
+  auth::SessionManager restored(auth::BuildCredentials(), FakePlatform());
+  const std::vector<std::uint8_t> salt(now.salt.begin(), now.salt.end());
+  const std::vector<std::uint8_t> key(now.derived_key.begin(),
+                                      now.derived_key.end());
+  EXPECT_TRUE(!restored.SetPasswordKey({}, now.iterations, key));
+  EXPECT_TRUE(!restored.SetPasswordKey(salt, 0, key));
+  EXPECT_TRUE(!restored.SetPasswordKey(
+      salt, auth::SessionManager::kMaxIterations + 1, key));
+  EXPECT_TRUE(!restored.SetPasswordKey(salt, now.iterations,
+                                       std::span(key).first(8)));
+  EXPECT_TRUE(!restored.password_changed());
+  EXPECT_TRUE(restored.Login("admin", "admin").has_value());
+  EXPECT_TRUE(restored.SetPasswordKey(salt, now.iterations, key));
+  EXPECT_TRUE(restored.Login("admin", "new password").has_value());
+  EXPECT_EQ(restored.Login("admin", "admin").error(),
+            auth::LoginError::kInvalidCredentials);
+}
+
+// ---------------------------------------------------------------------------
+// Saved settings
+
+// Storage in memory, like the flash log on the device.
+struct MemoryStorage {
+  std::vector<std::uint8_t> data;
+  int saves = 0;
+  bool fail = false;
+
+  webserver::SettingsStorage Storage() {
+    return {
+        .load = [](void* context, std::span<std::uint8_t> buffer) noexcept
+            -> std::size_t {
+          const auto& self = *static_cast<MemoryStorage*>(context);
+          if (self.data.size() > buffer.size()) {
+            return 0;
+          }
+          std::copy(self.data.begin(), self.data.end(), buffer.begin());
+          return self.data.size();
+        },
+        .save = [](void* context,
+                   std::span<const std::uint8_t> bytes) noexcept {
+          auto& self = *static_cast<MemoryStorage*>(context);
+          if (self.fail) {
+            return false;
+          }
+          self.data.assign(bytes.begin(), bytes.end());
+          ++self.saves;
+          return true;
+        },
+        .erase = [](void* context) noexcept {
+          static_cast<MemoryStorage*>(context)->data.clear();
+          return true;
+        },
+        .context = this,
+    };
+  }
+};
+
+bool AcceptConfig(void*, const webserver::UartConfig&) noexcept { return true; }
+
+bool AcceptBridge(void*, std::uint8_t,
+                  const webserver::UartBridgeSettings&) noexcept {
+  return true;
+}
+
+// `count` ports with ids 1.., every option allowed, a bridge on each.
+std::vector<webserver::UartPort> TestPorts(std::size_t count) {
+  const webserver::UartCapabilities all{
+      .min_baud_rate = 300,
+      .max_baud_rate = 0xFFFFFFFF,
+      .word_lengths = {webserver::UartWordLength::kBits7,
+                       webserver::UartWordLength::kBits8,
+                       webserver::UartWordLength::kBits9},
+      .stop_bits = {webserver::UartStopBits::kOne,
+                    webserver::UartStopBits::kHalf,
+                    webserver::UartStopBits::kTwo,
+                    webserver::UartStopBits::kOneAndHalf},
+      .parities = {webserver::UartParity::kNone, webserver::UartParity::kEven,
+                   webserver::UartParity::kOdd},
+      .flow_controls = {webserver::UartFlowControl::kNone,
+                        webserver::UartFlowControl::kRts,
+                        webserver::UartFlowControl::kCts,
+                        webserver::UartFlowControl::kRtsCts},
+      .oversampling = {webserver::UartOversampling::kBy16,
+                       webserver::UartOversampling::kBy8},
+      .fifo = true,
+      .tx_rx_swap = true,
+  };
+  std::vector<webserver::UartPort> ports(count);
+  for (std::size_t i = 0; i < count; ++i) {
+    const auto id = static_cast<std::uint8_t>(i + 1);
+    ports[i] = {.id = id,
+                .name = "PORT",
+                .description = "",
+                .capabilities = all,
+                .driver = {.apply = &AcceptConfig},
+                .config = {.port_id = id},
+                .bridge_driver = {.apply = &AcceptBridge}};
+  }
+  return ports;
+}
+
+void TestSettingsStore() {
+  MemoryStorage memory;
+  std::vector<std::uint8_t> scratch(webserver::SettingsStore::kMaxSize);
+  {
+    auto ports = TestPorts(3);
+    webserver::UartService service(ports);
+    auth::SessionManager sessions(auth::BuildCredentials(), FakePlatform());
+    webserver::SettingsStore store(service, sessions, memory.Storage());
+    EXPECT_TRUE(store.available());
+    EXPECT_TRUE(!store.Restore(scratch));  // Nothing saved yet.
+
+    EXPECT_TRUE(service.Apply({.port_id = 1,
+                               .baud_rate = 9'600,
+                               .parity = webserver::UartParity::kEven})
+                    .has_value());
+    // An RFC 2217 client's settings are not saved.
+    EXPECT_TRUE(service.ApplyTemporary({.port_id = 2, .baud_rate = 300})
+                    .has_value());
+    EXPECT_TRUE(service
+                    .ApplyBridge(3, {.enabled = true,
+                                     .mode = webserver::UartBridgeMode::kUdp,
+                                     .local_port = 5000,
+                                     .remote_address = {10, 0, 0, 9},
+                                     .remote_port = 6000,
+                                     .idle_gap_ms = 7})
+                    .has_value());
+    const auto token = *sessions.Login("admin", "admin");
+    EXPECT_TRUE(
+        sessions.ChangePassword("admin", "saved password", View(token)));
+    EXPECT_TRUE(store.Save(scratch));
+    EXPECT_EQ(memory.saves, 1);
+    // Too small a scratch buffer, a failing storage.
+    EXPECT_TRUE(!store.Save(std::span(scratch).first(100)));
+    memory.fail = true;
+    EXPECT_TRUE(!store.Save(scratch));
+    memory.fail = false;
+  }
+  {
+    // The next start: platform defaults until Restore().
+    auto ports = TestPorts(3);
+    webserver::UartService service(ports);
+    auth::SessionManager sessions(auth::BuildCredentials(), FakePlatform());
+    webserver::SettingsStore store(service, sessions, memory.Storage());
+    EXPECT_TRUE(store.Restore(scratch));
+    EXPECT_EQ(ports[0].config.baud_rate, 9'600U);
+    EXPECT_TRUE(ports[0].config.parity == webserver::UartParity::kEven);
+    EXPECT_TRUE(ports[0].saved_config.has_value());
+    EXPECT_EQ(ports[1].config.baud_rate, 115'200U);
+    EXPECT_TRUE(!ports[1].saved_config.has_value());
+    EXPECT_TRUE(ports[2].bridge.enabled);
+    EXPECT_TRUE(ports[2].bridge.mode == webserver::UartBridgeMode::kUdp);
+    EXPECT_EQ(ports[2].bridge.remote_address[3], 9);
+    EXPECT_EQ(ports[2].bridge.idle_gap_ms, 7);
+    EXPECT_TRUE(!ports[1].bridge.enabled);
+    EXPECT_TRUE(sessions.Login("admin", "saved password").has_value());
+    EXPECT_TRUE(!sessions.Login("admin", "admin").has_value());
+
+    // Settings a port no longer supports are skipped.
+    ports[0].capabilities.max_baud_rate = 4'800;
+    ports[0].config.baud_rate = 115'200;
+    EXPECT_TRUE(store.Restore(scratch));
+    EXPECT_EQ(ports[0].config.baud_rate, 115'200U);
+
+    EXPECT_TRUE(store.Erase());
+    EXPECT_TRUE(!store.Restore(scratch));
+  }
+  {
+    // Garbage in the storage is ignored.
+    auto ports = TestPorts(1);
+    webserver::UartService service(ports);
+    auth::SessionManager sessions(auth::BuildCredentials(), FakePlatform());
+    webserver::SettingsStore store(service, sessions, memory.Storage());
+    memory.data.assign(64, 0x5A);
+    EXPECT_TRUE(!store.Restore(scratch));
+    EXPECT_TRUE(sessions.Login("admin", "admin").has_value());
+
+    // Without a storage: RAM only.
+    webserver::SettingsStore ram_only(service, sessions, {});
+    EXPECT_TRUE(!ram_only.available());
+    EXPECT_TRUE(!ram_only.Save(scratch));
+    EXPECT_TRUE(!ram_only.Erase());
+  }
+}
+
+// kMaxUartPorts ports with every saved field at its largest encoding must
+// fit SettingsStore::kMaxSize (the arena would trap otherwise).
+void TestSettingsBound() {
+  MemoryStorage memory;
+  auto ports = TestPorts(webserver::kMaxUartPorts);
+  for (webserver::UartPort& port : ports) {
+    port.saved_config = webserver::UartConfig{
+        .port_id = port.id,
+        .baud_rate = 0xFFFFFFFF,
+        .word_length = webserver::UartWordLength::kBits9,
+        .stop_bits = webserver::UartStopBits::kOneAndHalf,
+        .parity = webserver::UartParity::kOdd,
+        .flow_control = webserver::UartFlowControl::kRtsCts,
+        .oversampling = webserver::UartOversampling::kBy8,
+        .fifo_enabled = true,
+        .tx_rx_swap = true};
+    port.bridge = {.enabled = true,
+                   .mode = webserver::UartBridgeMode::kUdp,
+                   .local_port = 65535,
+                   .remote_address = {255, 255, 255, 255},
+                   .remote_port = 65535,
+                   .idle_gap_ms = 1000,
+                   .max_frame = 1460,
+                   .use_delimiter = true,
+                   .delimiter = 255};
+  }
+  webserver::UartService service(ports);
+  auth::SessionManager sessions(auth::BuildCredentials(), FakePlatform());
+  const std::vector<std::uint8_t> salt(auth::SessionManager::kMaxSaltSize,
+                                       0xFF);
+  const std::vector<std::uint8_t> key(auth::SessionManager::kMaxKeySize, 0xFF);
+  EXPECT_TRUE(sessions.SetPasswordKey(
+      salt, auth::SessionManager::kMaxIterations, key));
+  webserver::SettingsStore store(service, sessions, memory.Storage());
+  std::vector<std::uint8_t> scratch(webserver::SettingsStore::kMaxSize);
+  EXPECT_TRUE(store.Save(scratch));
+  EXPECT_TRUE(!memory.data.empty() &&
+              memory.data.size() <= webserver::SettingsStore::kMaxSize);
+  std::printf("saved settings: %zu ports, %zu B (limit %zu B)\n",
+              ports.size(), memory.data.size(),
+              webserver::SettingsStore::kMaxSize);
+  flatbuffers::Verifier verifier(memory.data.data(), memory.data.size());
+  EXPECT_TRUE(verifier.VerifyBuffer<api::SavedSettings>(nullptr));
+}
+
 // ---------------------------------------------------------------------------
 // HTTP helpers
 
@@ -318,6 +601,14 @@ std::vector<std::uint8_t> BridgeBody(
   return Finished(builder);
 }
 
+std::vector<std::uint8_t> PasswordBody(std::string_view current,
+                                       std::string_view next) {
+  flatbuffers::FlatBufferBuilder builder;
+  builder.Finish(api::CreateChangePasswordRequest(
+      builder, builder.CreateString(current), builder.CreateString(next)));
+  return Finished(builder);
+}
+
 template <typename T>
 const T* Verified(const HttpResponse& response) {
   flatbuffers::Verifier verifier(response.body().data(),
@@ -402,7 +693,8 @@ void TestApplication() {
   const auto* info = Verified<api::SystemInfo>(
       client.Send(HttpMethod::kGet, "/api/system/info"));
   EXPECT_TRUE(info != nullptr && info->ipv4_address()->size() == 4 &&
-              info->platform()->string_view() == "POSIX sockets");
+              info->platform()->string_view() == "POSIX sockets" &&
+              !info->settings_saved());
 
   // Port list with capabilities.
   const HttpResponse& list = client.Send(HttpMethod::kGet, "/api/uart/ports");
@@ -506,11 +798,117 @@ void TestApplication() {
   EXPECT_EQ(bridge(BridgeBody(2, false, 0)), HttpStatus::kNoContent);
   EXPECT_EQ(bridge(BridgeBody(1, true, 4001)), HttpStatus::kNoContent);
 
+  // Password: 403 (not 401, which would end the UI's session) for a wrong
+  // current one, 422 for a short new one.
+  const auto password = [&](std::string_view current, std::string_view next) {
+    return client
+        .Send(HttpMethod::kPost, "/api/auth/password",
+              PasswordBody(current, next))
+        .status;
+  };
+  EXPECT_EQ(password("nope", "long enough"), HttpStatus::kForbidden);
+  EXPECT_EQ(password("admin", "short"), HttpStatus::kUnprocessableEntity);
+  EXPECT_EQ(password("admin", "long enough"), HttpStatus::kNoContent);
+  EXPECT_EQ(client.Send(HttpMethod::kGet, "/api/uart/ports").status,
+            HttpStatus::kOk);  // This session stays.
+  EXPECT_EQ(client.Send(HttpMethod::kPost, "/api/auth/login",
+                        LoginBody("admin", "admin"))
+                .status,
+            HttpStatus::kUnauthorized);
+  EXPECT_EQ(client.Send(HttpMethod::kPost, "/api/auth/login",
+                        LoginBody("admin", "long enough"))
+                .status,
+            HttpStatus::kOk);
+  // No settings storage here.
+  EXPECT_EQ(client.Send(HttpMethod::kPost, "/api/settings/reset").status,
+            HttpStatus::kNotImplemented);
+
   // Logout ends the session.
   EXPECT_EQ(client.Send(HttpMethod::kPost, "/api/auth/logout").status,
             HttpStatus::kNoContent);
   EXPECT_EQ(client.Send(HttpMethod::kGet, "/api/uart/ports").status,
             HttpStatus::kUnauthorized);
+}
+
+// The API saves what it changes, and a new application (the next start)
+// restores it.
+void TestApplicationSavesSettings() {
+  MemoryStorage memory;
+  std::vector<std::uint8_t> scratch(webserver::SettingsStore::kMaxSize);
+  auto ports = TestPorts(2);
+  {
+    webserver::WebApplication web{{
+        .resources = webserver::WebResources(),
+        .uart_ports = ports,
+        .credentials = auth::BuildCredentials(),
+        .platform = host::HostPlatform(),
+        .system = host::HostSystem(),
+        .settings_storage = memory.Storage(),
+    }};
+    Client client(web.server());
+    const auto* login = Verified<api::LoginResponse>(client.Send(
+        HttpMethod::kPost, "/api/auth/login", LoginBody("admin", "admin")));
+    EXPECT_TRUE(login != nullptr);
+    if (login == nullptr) {
+      return;
+    }
+    client.set_token(login->token()->string_view());
+    const auto* info = Verified<api::SystemInfo>(
+        client.Send(HttpMethod::kGet, "/api/system/info"));
+    EXPECT_TRUE(info != nullptr && info->settings_saved());
+
+    EXPECT_EQ(client.Send(HttpMethod::kPost, "/api/uart/config",
+                          SettingsBody(2, 57'600))
+                  .status,
+              HttpStatus::kNoContent);
+    EXPECT_EQ(memory.saves, 1);
+    EXPECT_EQ(client.Send(HttpMethod::kPost, "/api/bridge/config",
+                          BridgeBody(1, true, 4321))
+                  .status,
+              HttpStatus::kNoContent);
+    EXPECT_EQ(memory.saves, 2);
+    EXPECT_EQ(client.Send(HttpMethod::kPost, "/api/auth/password",
+                          PasswordBody("admin", "restored pw"))
+                  .status,
+              HttpStatus::kNoContent);
+    EXPECT_EQ(memory.saves, 3);
+    // A refused change saves nothing; a failing storage is reported.
+    EXPECT_EQ(client.Send(HttpMethod::kPost, "/api/uart/config",
+                          SettingsBody(9, 9'600))
+                  .status,
+              HttpStatus::kNotFound);
+    EXPECT_EQ(memory.saves, 3);
+    memory.fail = true;
+    EXPECT_EQ(client.Send(HttpMethod::kPost, "/api/uart/config",
+                          SettingsBody(1, 19'200))
+                  .status,
+              HttpStatus::kInternalError);
+    memory.fail = false;
+  }
+  ports = TestPorts(2);
+  webserver::WebApplication web{{
+      .resources = webserver::WebResources(),
+      .uart_ports = ports,
+      .credentials = auth::BuildCredentials(),
+      .platform = host::HostPlatform(),
+      .system = host::HostSystem(),
+      .settings_storage = memory.Storage(),
+  }};
+  EXPECT_TRUE(web.settings().Restore(scratch));
+  EXPECT_EQ(ports[1].config.baud_rate, 57'600U);
+  EXPECT_EQ(ports[0].config.baud_rate, 115'200U);  // The failed save.
+  EXPECT_TRUE(ports[0].bridge.enabled && ports[0].bridge.local_port == 4321);
+  Client client(web.server());
+  const auto* login = Verified<api::LoginResponse>(client.Send(
+      HttpMethod::kPost, "/api/auth/login", LoginBody("admin", "restored pw")));
+  EXPECT_TRUE(login != nullptr);
+  if (login == nullptr) {
+    return;
+  }
+  client.set_token(login->token()->string_view());
+  EXPECT_EQ(client.Send(HttpMethod::kPost, "/api/settings/reset").status,
+            HttpStatus::kNoContent);
+  EXPECT_TRUE(memory.data.empty());
 }
 
 // The port list estimate must bound the real size, or FlatBufferArena could
@@ -603,8 +1001,12 @@ int main() {
   TestSha256();
   TestHmacAndPbkdf2();
   TestSessions();
+  TestPasswordChange();
+  TestSettingsStore();
+  TestSettingsBound();
   TestHeaders();
   TestApplication();
+  TestApplicationSavesSettings();
   TestPortListBound();
   if (failures != 0) {
     std::printf("%d check(s) failed\n", failures);

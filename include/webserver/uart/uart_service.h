@@ -53,7 +53,13 @@ class UartService {
                        UartServiceLock lock = {}) noexcept
       : ports_(ports), lock_(lock) {}
 
+  // Settings from the web UI: also kept as the port's saved_config.
   std::expected<void, UartError> Apply(const UartConfig& config) noexcept;
+
+  // Settings for the current connection only (an RFC 2217 client): the
+  // saved settings stay as they are.
+  std::expected<void, UartError> ApplyTemporary(
+      const UartConfig& config) noexcept;
 
   // kUnsupported also for a port without bridge, values out of range or a
   // local port another enabled bridge uses.
@@ -68,6 +74,8 @@ class UartService {
   std::span<const UartPort> ports() const noexcept { return ports_; }
 
  private:
+  std::expected<void, UartError> ApplyConfig(const UartConfig& config,
+                                             bool save) noexcept;
   UartPort* Find(std::uint8_t id) const noexcept;
   bool LocalPortInUse(const UartPort& except,
                       std::uint16_t local_port) const noexcept;

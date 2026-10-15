@@ -11,6 +11,8 @@ table SystemInfo {
   ipv4_address: [ubyte];     // 4 bytes, empty if unknown.
   ipv4_netmask: [ubyte];
   mac_address: [ubyte];      // 6 bytes, empty if unknown.
+  // Settings and password survive a restart (else they live in RAM only).
+  settings_saved: bool;
 }
 
 root_type SystemInfo;

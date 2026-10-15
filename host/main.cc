@@ -1,7 +1,12 @@
 // The web application on a PC with simulated UART ports:
 //
-//   webserver_host [port]      (default 8080, login from WEBSERVER_ADMIN_*)
+//   webserver_host [port [settings-file]]
+//
+// Port 8080 by default, login from WEBSERVER_ADMIN_*. Settings changed in
+// the UI are saved to `settings-file` and restored from it at start;
+// without one they are kept in memory only.
 
+#include <array>
 #include <charconv>
 #include <cstdint>
 #include <cstdlib>
@@ -28,7 +33,11 @@ int main(int argc, char** argv) {
       .credentials = webserver::auth::BuildCredentials(),
       .platform = host::HostPlatform(),
       .system = host::HostSystem(),
+      .settings_storage =
+          host::HostSettingsStorage(argc > 2 ? argv[2] : nullptr),
   }};
+  static std::array<std::uint8_t, webserver::SettingsStore::kMaxSize> scratch;
+  web.settings().Restore(scratch);
   static webserver::posix::HttpListener listener{web.server()};
   if (!listener.Run(port)) {
     logging::Error("host", "cannot listen on port {}", port);

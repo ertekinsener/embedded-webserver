@@ -5,6 +5,7 @@
 import * as flatbuffers from 'flatbuffers';
 
 import { BridgeSettingsT } from '@api/bridge-settings';
+import { ChangePasswordRequestT } from '@api/change-password-request';
 import { LoginRequestT } from '@api/login-request';
 import { LoginResponse, LoginResponseT } from '@api/login-response';
 import { SystemInfo, SystemInfoT } from '@api/system-info';
@@ -45,6 +46,10 @@ export function text(value: string | Uint8Array | null): string {
 
 export function encodeLoginRequest(username: string, password: string): Uint8Array {
   return finish(new LoginRequestT(username, password));
+}
+
+export function encodeChangePasswordRequest(current: string, next: string): Uint8Array {
+  return finish(new ChangePasswordRequestT(current, next));
 }
 
 export function encodeUartSettings(settings: UartSettingsT): Uint8Array {

@@ -49,6 +49,51 @@ void AuthApi::Logout(const HttpRequest& request,
   response.SetEmpty(HttpStatus::kNoContent);
 }
 
+void AuthApi::ChangePassword(const HttpRequest& request,
+                             HttpResponse& response) noexcept {
+  const auto* change =
+      DecodeRequest<api::ChangePasswordRequest>(request, response);
+  if (change == nullptr) {
+    return;
+  }
+  const auto result = sessions_.ChangePassword(
+      ToStringView(change->current_password()),
+      ToStringView(change->new_password()),
+      BearerToken(request.authorization));
+  if (!result) {
+    switch (result.error()) {
+      case PasswordError::kWrongPassword:
+        logging::Warning("auth", "password change: wrong password");
+        // Not 401: the session is still valid.
+        response.SetText(HttpStatus::kForbidden,
+                         "The current password is wrong");
+        return;
+      case PasswordError::kLockedOut:
+        response.SetText(HttpStatus::kTooManyRequests,
+                         "Too many failed attempts, try again later");
+        return;
+      case PasswordError::kInvalidPassword:
+        response.SetText(HttpStatus::kUnprocessableEntity,
+                         "The new password must have 8 to 64 characters");
+        return;
+      case PasswordError::kNoRandom:
+        logging::Error("auth", "no random numbers for a password salt");
+        response.SetText(HttpStatus::kServiceUnavailable,
+                         "No random source");
+        return;
+    }
+  }
+  logging::Info("auth", "password changed");
+  if (settings_ != nullptr && settings_->available() &&
+      !settings_->Save(response.buffer())) {
+    response.SetText(HttpStatus::kInternalError,
+                     "Password changed, but saving it failed: the old one "
+                     "returns after a restart");
+    return;
+  }
+  response.SetEmpty(HttpStatus::kNoContent);
+}
+
 bool AuthApi::Authorize(const HttpRequest& request) noexcept {
   return sessions_.Validate(BearerToken(request.authorization));
 }

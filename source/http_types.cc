@@ -18,6 +18,8 @@ std::string_view StatusLine(HttpStatus status) noexcept {
       return "400 Bad Request";
     case HttpStatus::kUnauthorized:
       return "401 Unauthorized";
+    case HttpStatus::kForbidden:
+      return "403 Forbidden";
     case HttpStatus::kNotFound:
       return "404 Not Found";
     case HttpStatus::kMethodNotAllowed:
@@ -30,6 +32,8 @@ std::string_view StatusLine(HttpStatus status) noexcept {
       return "422 Unprocessable Entity";
     case HttpStatus::kTooManyRequests:
       return "429 Too Many Requests";
+    case HttpStatus::kNotImplemented:
+      return "501 Not Implemented";
     case HttpStatus::kServiceUnavailable:
       return "503 Service Unavailable";
     case HttpStatus::kInternalError:

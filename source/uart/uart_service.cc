@@ -11,6 +11,16 @@ namespace webserver {
 
 std::expected<void, UartError> UartService::Apply(
     const UartConfig& config) noexcept {
+  return ApplyConfig(config, true);
+}
+
+std::expected<void, UartError> UartService::ApplyTemporary(
+    const UartConfig& config) noexcept {
+  return ApplyConfig(config, false);
+}
+
+std::expected<void, UartError> UartService::ApplyConfig(
+    const UartConfig& config, bool save) noexcept {
   const Guard guard(lock_);
   UartPort* port = Find(config.port_id);
   if (port == nullptr) {
@@ -29,6 +39,9 @@ std::expected<void, UartError> UartService::Apply(
     return std::unexpected(UartError::kRejected);
   }
   port->config = config;
+  if (save) {
+    port->saved_config = config;
+  }
   logging::Info("uart", "{} set to {} baud", port->name, config.baud_rate);
   return {};
 }

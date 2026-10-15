@@ -63,6 +63,7 @@ export function shellView(
           navLink(`#/ports/${port.id}`, portName(port), 'port', active, settingsSummary(port.settings)),
         ),
         navLink('#/device', 'Device', 'device', active),
+        navLink('#/account', 'Account', 'user', active),
       ),
     ),
     h(

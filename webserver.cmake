@@ -39,8 +39,11 @@ set(webserver_core_sources
     "${WEBSERVER_DIR}/source/http_server.cc"
     "${WEBSERVER_DIR}/source/http_types.cc"
     "${WEBSERVER_DIR}/source/resource_registry.cc"
+    "${WEBSERVER_DIR}/source/settings/settings_api.cc"
+    "${WEBSERVER_DIR}/source/settings/settings_store.cc"
     "${WEBSERVER_DIR}/source/system/system_api.cc"
     "${WEBSERVER_DIR}/source/uart/uart_api.cc"
+    "${WEBSERVER_DIR}/source/uart/uart_codec.cc"
     "${WEBSERVER_DIR}/source/uart/uart_service.cc"
     "${WEBSERVER_DIR}/source/web_application.cc")
 
@@ -57,7 +60,8 @@ function(_webserver_generate_flatbuffers out_dir out_headers)
       OUTPUT "${header}"
       COMMAND "${FLATC_EXECUTABLE}" --cpp --scoped-enums -o "${out_dir}"
               "${schema}"
-      DEPENDS "${schema}"
+      # Schemas include each other (settings.fbs uses uart.fbs).
+      DEPENDS ${webserver_schemas}
       COMMENT "flatc ${name}.fbs"
       VERBATIM)
     list(APPEND headers "${header}")

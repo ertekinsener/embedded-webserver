@@ -2,8 +2,10 @@
 #define WEBSERVER_INCLUDE_WEBSERVER_UART_UART_TYPES_
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <optional>
 #include <string_view>
 #include <utility>
 
@@ -166,6 +168,9 @@ struct UartBridgeDriver {
   void* context = nullptr;
 };
 
+// Most ports the web UI lists (and the saved settings hold).
+inline constexpr std::size_t kMaxUartPorts = 16;
+
 // One port offered by the web UI, owned by the platform's application code.
 struct UartPort {
   std::uint8_t id;
@@ -177,6 +182,10 @@ struct UartPort {
   UartConfig config;
   UartBridgeDriver bridge_driver{};
   UartBridgeSettings bridge{};  // Updated by UartService.
+  // Settings last applied from the web UI (or restored at start), which
+  // SettingsStore saves; an RFC 2217 client changes only `config`. nullopt:
+  // never changed, the platform's default applies.
+  std::optional<UartConfig> saved_config{};
 };
 
 }  // namespace webserver

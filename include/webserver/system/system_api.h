@@ -29,13 +29,15 @@ struct SystemDescription {
 // GET /api/system/info (schema/system.fbs).
 class SystemApi {
  public:
-  explicit SystemApi(const SystemDescription& description) noexcept
-      : description_(description) {}
+  // `settings_saved`: the platform keeps settings across restarts.
+  SystemApi(const SystemDescription& description, bool settings_saved) noexcept
+      : description_(description), settings_saved_(settings_saved) {}
 
   void Info(const HttpRequest& request, HttpResponse& response) noexcept;
 
  private:
   SystemDescription description_;
+  bool settings_saved_;
 };
 
 }  // namespace webserver

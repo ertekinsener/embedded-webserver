@@ -1,0 +1,22 @@
+// Settings the device keeps across restarts (webserver/README.md,
+// "Saved settings"): not an HTTP payload, but what SettingsStore hands to
+// the platform's storage. Fields may be added at the end of a table only,
+// so older saved settings stay readable.
+include "uart.fbs";
+
+namespace webserver.api;
+
+// The password as a PBKDF2-HMAC-SHA-256 key, like the build-time login.
+table SavedPassword {
+  salt: [ubyte];
+  iterations: uint32;
+  derived_key: [ubyte];
+}
+
+table SavedSettings {
+  uart: [UartSettings];       // Ports the web UI changed.
+  bridges: [BridgeSettings];  // Every port with a bridge.
+  password: SavedPassword;    // Absent: the build-time password.
+}
+
+root_type SavedSettings;

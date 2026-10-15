@@ -41,7 +41,8 @@ void SystemApi::Info(const HttpRequest& /*request*/,
   const auto mac = b.CreateVector(network.mac_address.data(), mac_size);
   b.Finish(api::CreateSystemInfo(
       b, device, platform, version, build_date,
-      d.uptime_s != nullptr ? d.uptime_s() : 0, address, netmask, mac));
+      d.uptime_s != nullptr ? d.uptime_s() : 0, address, netmask, mac,
+      settings_saved_));
   out.Send(HttpStatus::kOk);
 }
 

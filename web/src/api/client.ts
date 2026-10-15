@@ -7,6 +7,7 @@ import {
   decodeSystemInfo,
   decodeUartPorts,
   encodeBridgeSettings,
+  encodeChangePasswordRequest,
   encodeLoginRequest,
   encodeUartSettings,
   kFlatBufferType,
@@ -71,6 +72,14 @@ export const api = {
 
   async logout(): Promise<void> {
     await request('POST', '/api/auth/logout');
+  },
+
+  async changePassword(current: string, next: string): Promise<void> {
+    await request('POST', '/api/auth/password', encodeChangePasswordRequest(current, next));
+  },
+
+  async resetSettings(): Promise<void> {
+    await request('POST', '/api/settings/reset');
   },
 
   async systemInfo(): Promise<SystemInfoT> {
