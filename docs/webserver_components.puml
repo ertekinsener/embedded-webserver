@@ -31,7 +31,7 @@ package "webserver/ (portable, C++23, no heap)" {
   System ..> SysInfo
 }
 
-package "webserver/adapters/" {
+package "adapters/" {
   component "netx_duo::Adapter" as NetxAdapter
   component "zephyr::Adapter\n+ resource macros" as ZephyrAdapter
   component "posix::HttpListener" as PosixAdapter
@@ -61,13 +61,13 @@ ZService --> ZephyrAdapter : dynamic resource cb
 ZMain --> App : creates
 ZPorts ..|> Driver
 
-package "webserver/host/ (PC)" {
+package "host/ (PC)" {
   component "webserver_host\nsimulated ports" as Host
 }
 Host --> PosixAdapter
 Host --> App : creates
 
-package "webserver/web/ (built at build time)" {
+package "web/ (built at build time)" {
   artifact "schema/*.fbs" as Schemas
   artifact "src/*.ts + Tailwind" as Ui
   artifact "web_resources.{h,cc}\n(gzip byte arrays,\nWEBSERVER_WEB_RESOURCES)" as Generated

@@ -1,5 +1,5 @@
 @startuml web_ui_build
-title Web UI build (webserver/web/scripts/build.mjs, run by webserver_add())
+title Web UI build (web/scripts/build.mjs, run by webserver_add())
 
 start
 :npm ci (once per package-lock.json change);

@@ -4,7 +4,7 @@ import { icon } from '../ui/icons';
 import { showToast } from '../ui/toast';
 import type { AppData } from './shell';
 
-// Limits the device enforces (webserver/schema/auth.fbs), in UTF-8 bytes.
+// Limits the device enforces (schema/auth.fbs), in UTF-8 bytes.
 const kMinPasswordBytes = 8;
 const kMaxPasswordBytes = 64;
 

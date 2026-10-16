@@ -2,7 +2,7 @@
 // FlatBuffers TypeScript and runtime) against the C++ server: starts
 // webserver_host, then logs in, reads and changes UART settings over HTTP,
 // changes the password and restarts the server to check what it saved.
-// Run by ctest in the host build (webserver/host/CMakeLists.txt):
+// Run by ctest in the host build (host/CMakeLists.txt):
 //
 //   node scripts/smoke_test.mjs --server <webserver_host> --out <UI build dir>
 //

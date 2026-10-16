@@ -1,5 +1,5 @@
 // FlatBuffers encoding and decoding of the API payloads, with the code flatc
-// generates from webserver/schema/*.fbs (object API) and the FlatBuffers
+// generates from schema/*.fbs (object API) and the FlatBuffers
 // runtime. Independent of the DOM, so the smoke test can use it from Node.
 
 import * as flatbuffers from 'flatbuffers';

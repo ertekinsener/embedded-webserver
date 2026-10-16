@@ -1,4 +1,4 @@
-// The device's HTTP API (webserver/README.md, "API"). Every payload is a
+// The device's HTTP API (README.md, "API"). Every payload is a
 // FlatBuffer; errors come back as a status code with a short text.
 
 import {

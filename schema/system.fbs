@@ -1,4 +1,4 @@
-// Device information API (webserver/README.md, "API").
+// Device information API (README.md, "API").
 namespace webserver.api;
 
 // GET /api/system/info.

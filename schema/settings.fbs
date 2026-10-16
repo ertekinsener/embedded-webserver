@@ -1,4 +1,4 @@
-// Settings the device keeps across restarts (webserver/README.md,
+// Settings the device keeps across restarts (README.md,
 // "Saved settings"): not an HTTP payload, but what SettingsStore hands to
 // the platform's storage. Fields may be added at the end of a table only,
 // so older saved settings stay readable.

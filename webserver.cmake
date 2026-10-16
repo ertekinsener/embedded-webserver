@@ -1,16 +1,20 @@
-# Platform-independent web server (webserver/README.md), included by the CM7
-# firmware, the Zephyr application and the host build:
+# Platform-independent web server (README.md):
 #
-#   include(<repo>/webserver/webserver.cmake)
+#   include(<path>/embedded-webserver.cmake)
 #   webserver_add(<target> ADAPTER netxduo|zephyr|posix)
 #
 # Adds the core, the adapter for the network stack and the generated code to
 # <target>: FlatBuffers headers (flatc), the web UI as byte arrays (Node.js,
-# web/scripts/build.mjs) and the login credentials. The target must also be
-# able to include "logging/logger.h" (shared/include) and link the logger.
+# web/scripts/build.mjs) and the login credentials. They compile with the
+# target's flags and definitions (e.g. the NetX Duo user configuration). The
+# target must also link the logger front end, embedded_core::logging
+# (embedded-core).
 #
-# Needs flatc, node and npm on PATH. The first build runs `npm ci` in
-# webserver/web (needs network access once).
+# Needs flatc, node and npm on PATH. The first build runs `npm ci` in web/
+# (needs network access once).
+#
+# WEBSERVER_FLATBUFFERS_DIR: FlatBuffers source tree (C++ headers and the
+# TypeScript runtime), by default the external/flatbuffers submodule.
 #
 # Login (cache variables): WEBSERVER_ADMIN_USER, WEBSERVER_ADMIN_PASSWORD
 # (stored in the firmware only as a PBKDF2-HMAC-SHA-256 key),
@@ -18,7 +22,8 @@
 # once per build directory).
 
 set(WEBSERVER_DIR "${CMAKE_CURRENT_LIST_DIR}")
-get_filename_component(WEBSERVER_REPO_DIR "${WEBSERVER_DIR}/.." ABSOLUTE)
+set(WEBSERVER_FLATBUFFERS_DIR "${WEBSERVER_DIR}/external/flatbuffers"
+    CACHE PATH "FlatBuffers source tree used by the web server")
 
 set(WEBSERVER_ADMIN_USER "admin" CACHE STRING "Web UI user name")
 set(WEBSERVER_ADMIN_PASSWORD "admin" CACHE STRING
@@ -120,7 +125,8 @@ function(_webserver_build_web_ui out_dir out_sources)
   add_custom_command(
     OUTPUT ${outputs}
     COMMAND "${NODE_EXECUTABLE}" "${web_dir}/scripts/build.mjs" --out
-            "${out_dir}" --flatc "${FLATC_EXECUTABLE}"
+            "${out_dir}" --flatc "${FLATC_EXECUTABLE}" --flatbuffers-ts
+            "${WEBSERVER_FLATBUFFERS_DIR}/ts"
     # The script leaves unchanged outputs alone; touch them so this rule
     # does not run again.
     COMMAND "${CMAKE_COMMAND}" -E touch_nocreate ${outputs}
@@ -161,5 +167,5 @@ function(webserver_add target)
     "${target}"
     PUBLIC "${WEBSERVER_DIR}/include" "${adapter_dir}" "${gen_dir}"
             "${gen_dir}/web"
-            "${WEBSERVER_REPO_DIR}/external/flatbuffers/include")
+            "${WEBSERVER_FLATBUFFERS_DIR}/include")
 endfunction()

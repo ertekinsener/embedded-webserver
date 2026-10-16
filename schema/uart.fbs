@@ -1,4 +1,4 @@
-// UART configuration API (webserver/README.md, "API").
+// UART configuration API (README.md, "API").
 namespace webserver.api;
 
 enum WordLength : byte {

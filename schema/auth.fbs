@@ -1,4 +1,4 @@
-// Login API (webserver/README.md, "API").
+// Login API (README.md, "API").
 namespace webserver.api;
 
 // POST /api/auth/login (public).

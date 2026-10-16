@@ -1,28 +1,27 @@
 # The web server on a PC: a demo server with simulated UART ports (for UI
-# development) and the host tests of the platform-independent code.
+# development) and the host tests of the platform-independent code. Built
+# when embedded-webserver is the top-level project (../CMakeLists.txt):
 #
-#   cmake -S webserver/host -B build/webserver-host
-#   cmake --build build/webserver-host
-#   ctest --test-dir build/webserver-host --output-on-failure
-#   build/webserver-host/webserver_host 8080     # http://localhost:8080/
-cmake_minimum_required(VERSION 3.22)
-project(webserver_host LANGUAGES CXX)
+#   cmake -S . -B build && cmake --build build
+#   ctest --test-dir build --output-on-failure
+#   build/host/webserver_host 8080     # http://localhost:8080/
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-include("${CMAKE_CURRENT_SOURCE_DIR}/../webserver.cmake")
-set(shared_dir "${WEBSERVER_REPO_DIR}/shared")
 
 enable_testing()
 
 # Same restrictions as on the targets.
 set(host_options -Wall -Wextra -fno-exceptions -fno-rtti -g)
 
-add_library(host_logging STATIC "${shared_dir}/source/logging/format.cc"
-                                "${shared_dir}/source/logging/logger.cc")
-target_include_directories(host_logging PUBLIC "${shared_dir}/include")
+# The logger front end compiled once (its INTERFACE sources would otherwise
+# be compiled into every library below), with only its headers passed on.
+add_library(host_logging STATIC)
+target_link_libraries(host_logging PRIVATE embedded_core::logging)
+target_include_directories(
+  host_logging
+  PUBLIC "$<TARGET_PROPERTY:embedded_core_logging,INTERFACE_INCLUDE_DIRECTORIES>")
 target_compile_options(host_logging PRIVATE ${host_options})
 
 add_library(webserver_posix STATIC)

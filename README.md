@@ -10,15 +10,20 @@ code runs on
 | Zephyr (`nucleo_h755zi_q/stm32h755xx/m7`, `native_sim`) | Zephyr HTTP server | `zephyr_app/` | `adapters/zephyr` |
 | PC (Linux) | BSD sockets | `host/` (simulated ports, tests) | `adapters/posix` |
 
-Diagrams: `docs/webserver/webserver_components.puml` (structure),
-`webserver_request_sequence.puml` (login and settings),
-`web_ui_build.puml` (UI build), `docs/storage/settings_storage.puml` (saved
-settings).
+The firmware applications live in the
+[stm32_webserver](https://github.com/ertekinsener/stm32_webserver) project;
+paths below that start with `CM7/`, `zephyr_app/`, `tools/` or `docs/`
+(except `docs/*.puml` here) refer to it.
+
+Diagrams: `docs/webserver_components.puml` (structure),
+`docs/webserver_request_sequence.puml` (login and settings),
+`docs/web_ui_build.puml` (UI build); in stm32_webserver
+`docs/storage/settings_storage.puml` (saved settings).
 
 ## Layout
 
 ```
-webserver/
+embedded-webserver/
   include/webserver/   core headers (no network stack, no RTOS, no heap)
   source/              core sources
   adapters/<stack>/    one adapter per network stack
@@ -26,7 +31,22 @@ webserver/
   web/                 the UI (TypeScript, Tailwind) and its build scripts
   host/                PC build: demo server and tests
   webserver.cmake      webserver_add(<target> ADAPTER netxduo|zephyr|posix)
+  CMakeLists.txt       top-level project: the host/ build
+  external/            flatbuffers, embedded-core (logger front end)
 ```
+
+## Using it in a firmware
+
+```cmake
+add_subdirectory(<path>/embedded-core)            # embedded_core::logging
+include(<path>/embedded-webserver/webserver.cmake)
+webserver_add(firmware ADAPTER netxduo)
+target_link_libraries(firmware embedded_core::logging)
+```
+
+The sources compile as part of `firmware`, with its flags and the network
+stack's headers and user configuration. `WEBSERVER_FLATBUFFERS_DIR` selects
+another FlatBuffers tree than `external/flatbuffers` (it must match `flatc`).
 
 - `WebApplication` wires everything: `ResourceRegistry` (embedded files),
   `ApiRouter` (exact path + method, 404/405, `Access::kSession` routes need a
@@ -138,7 +158,7 @@ compiled at build time and icons are inline SVG (Font Awesome Free), so the
 UI needs nothing from the internet. The whole UI is about 22 KB in flash.
 
 `web/scripts/build.mjs` (run by `webserver_add()`; diagram
-`docs/webserver/web_ui_build.puml`): flatc, `tsc` type check, esbuild bundle,
+`docs/web_ui_build.puml`): flatc, `tsc` type check, esbuild bundle,
 Tailwind, content-hashed asset names (cached for a year; `index.html` is
 `no-cache`), gzip, and `web_resources.{h,cc}` with `WebResources()` and the
 `WEBSERVER_WEB_RESOURCES` X-macro list. Rebuilding the firmware rebuilds the
@@ -151,11 +171,15 @@ and do not end up in the firmware.
 ## Building and testing on the PC
 
 ```bash
-cmake -S webserver/host -B build/webserver-host -G Ninja
-cmake --build build/webserver-host
-ctest --test-dir build/webserver-host --output-on-failure
-build/webserver-host/webserver_host 8080      # http://localhost:8080, admin/admin
+git submodule update --init --recursive
+cmake -S . -B build -G Ninja
+cmake --build build
+ctest --test-dir build --output-on-failure
+build/host/webserver_host 8080      # http://localhost:8080, admin/admin
 ```
+
+embedded-core comes from `external/embedded-core`, or from a checkout next to
+this one (`../embedded-core`); `WEBSERVER_EMBEDDED_CORE_DIR` overrides both.
 
 - `webserver_test`: SHA-256/HMAC/PBKDF2 test vectors, sessions (timeout,
   lockout, eviction, password change), header parsing, routing, every API
@@ -177,7 +201,7 @@ build/webserver-host/webserver_host 8080      # http://localhost:8080, admin/adm
    a `SystemDescription` and a `UartPort` table with drivers; optionally a
    `SettingsStorage` (then call `settings().Restore()` at start).
 3. `webserver_add(<target> ADAPTER <name>)` in CMake (add the adapter to
-   `webserver.cmake`), and the logger front end (`shared/source/logging/`)
+   `webserver.cmake`), and the logger front end (`embedded_core::logging`)
    with a sink.
 
 Servers that register paths up front (like Zephyr) can use the

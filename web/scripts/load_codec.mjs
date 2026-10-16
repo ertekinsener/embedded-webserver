@@ -18,7 +18,7 @@ export async function loadCodec(generatedDir) {
     write: false,
     alias: {
       '@api': path.join(generatedDir, 'ts/webserver/api'),
-      flatbuffers: path.join(webDir, '../../external/flatbuffers/ts/flatbuffers.ts'),
+      flatbuffers: path.join(webDir, '../external/flatbuffers/ts/flatbuffers.ts'),
     },
   });
   const source = Buffer.from(result.outputFiles[0].contents).toString('base64');
