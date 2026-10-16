@@ -1,0 +1,6 @@
+[submodule "external/flatbuffers"]
+	path = external/flatbuffers
+	url = https://github.com/google/flatbuffers.git
+[submodule "external/embedded-core"]
+	path = external/embedded-core
+	url = ../embedded-core.git
